@@ -20,15 +20,6 @@ const LOCAL_UPLOADS_DIR = process.env.VERCEL
 // In-memory negative cache for missing files to prevent repeated failed network roundtrips
 const missingFilesCache = new Set<string>();
 
-// Ensure local uploads folder exists safely
-try {
-  if (!fs.existsSync(LOCAL_UPLOADS_DIR)) {
-    fs.mkdirSync(LOCAL_UPLOADS_DIR, { recursive: true });
-  }
-} catch (e) {
-  // Gracefully continue on read-only environments
-}
-
 // Helper to check SFTP config
 const hasSftpConfig = () => {
   return !!(
