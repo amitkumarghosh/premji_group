@@ -12,7 +12,8 @@ import {
   Wrench,
   Calendar,
   Layers,
-  CheckSquare
+  CheckSquare,
+  SwitchCamera
 } from 'lucide-react';
 import { formatPhotoUrl, FALLBACK_IMAGE_SVG } from '../utils/photoUtils';
 import { authFetch } from '../utils/api';
@@ -61,6 +62,15 @@ export const CreateUpdateWO: React.FC<CreateUpdateWOProps> = ({
 
   const [jobcardPhotoBase64, setJobcardPhotoBase64] = useState<string | null>(null);
   const [previewExistingPhoto, setPreviewExistingPhoto] = useState<string | null>(null);
+
+  // Device Camera state for Jobcard Photo (Defaults to Rear/Environment camera for documents)
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Mode 2 ("Re-assign workorder") State
   const [reassignForm, setReassignForm] = useState({
@@ -182,31 +192,167 @@ export const CreateUpdateWO: React.FC<CreateUpdateWOProps> = ({
     }
   };
 
-  // Image capture / upload & compression
+  // Start Device Camera (Default: Rear/Environment camera for physical jobcards)
+  const startCamera = async (targetFacing: 'environment' | 'user' = 'environment') => {
+    setCameraError(null);
+    setCameraLoading(true);
+    setIsCameraActive(true);
+
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+
+    try {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: targetFacing },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          },
+          audio: false
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: targetFacing },
+          audio: false
+        });
+      }
+
+      cameraStreamRef.current = stream;
+      setCameraFacingMode(targetFacing);
+
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = stream;
+        await cameraVideoRef.current.play().catch(console.error);
+      }
+    } catch (err: any) {
+      console.error('Camera access error:', err);
+      setCameraError('Camera access unavailable. Please ensure camera permissions are granted or upload a file.');
+    } finally {
+      setCameraLoading(false);
+    }
+  };
+
+  // Stop Device Camera
+  const stopCamera = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+    setIsCameraActive(false);
+    setCameraError(null);
+  };
+
+  // Switch between back and front camera
+  const toggleCameraFacing = () => {
+    const nextFacing = cameraFacingMode === 'environment' ? 'user' : 'environment';
+    startCamera(nextFacing);
+  };
+
+  // Capture photo snapshot from the active video stream
+  const capturePhotoFromCamera = () => {
+    const video = cameraVideoRef.current;
+    if (!video) return;
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      if (cameraFacingMode === 'user') {
+        ctx.save();
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+
+      // High-contrast provenance timestamp stamp
+      const nowStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+      ctx.fillRect(12, canvas.height - 38, 360, 26);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(`Jobcard Capture • ${nowStr}`, 20, canvas.height - 20);
+
+      // Optimize image size to ensure fast transmission & storage
+      const maxDimension = 1600;
+      let finalCanvas = canvas;
+      if (canvas.width > maxDimension || canvas.height > maxDimension) {
+        const scale = Math.min(maxDimension / canvas.width, maxDimension / canvas.height);
+        const scaledCanvas = document.createElement('canvas');
+        scaledCanvas.width = canvas.width * scale;
+        scaledCanvas.height = canvas.height * scale;
+        const scaledCtx = scaledCanvas.getContext('2d');
+        if (scaledCtx) {
+          scaledCtx.drawImage(canvas, 0, 0, scaledCanvas.width, scaledCanvas.height);
+          finalCanvas = scaledCanvas;
+        }
+      }
+
+      const webp = finalCanvas.toDataURL('image/webp', 0.88);
+      // Strictly set single photo
+      setJobcardPhotoBase64(webp);
+      stopCamera();
+      onNotification('Jobcard photo captured successfully!', 'success');
+    } catch (e: any) {
+      console.error('Failed to capture frame:', e);
+      onNotification('Failed to capture photo frame. Please try again.', 'error');
+    }
+  };
+
+  // Image upload handler (strictly ONE image file at a time)
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    // Strictly enforce single image: only take files[0]
+    const file = files[0];
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const maxW = 1200;
+        const maxW = 1600;
         const scale = img.width > maxW ? maxW / img.width : 1;
         canvas.width = img.width * scale;
         canvas.height = img.height * scale;
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          const webp = canvas.toDataURL('image/webp', 0.85);
+          const webp = canvas.toDataURL('image/webp', 0.88);
+          // Strictly replace with this single image
           setJobcardPhotoBase64(webp);
-          onNotification('Jobcard photo captured successfully!', 'success');
+          stopCamera();
+          onNotification('Single jobcard photo attached successfully!', 'success');
         }
       };
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
+
+    // Reset input so user can re-upload if desired
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
+
+  // Cleanup camera stream on unmount or tab switch
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, [jobcardMode]);
 
   // Submit Handler for Mode 1 ("New workorder")
   const handleNewWorkorderSubmit = async (e: React.FormEvent) => {
@@ -604,44 +750,224 @@ export const CreateUpdateWO: React.FC<CreateUpdateWOProps> = ({
             </div>
           </div>
 
-          {/* Mandatory Jobcard Photo Capture */}
-          <div className="p-4 bg-slate-50 border border-dashed border-slate-300 rounded-xl space-y-3">
+          {/* Mandatory Jobcard Photo Capture (Camera or Single Upload) */}
+          <div className="p-4 bg-sky-50/50 border border-sky-200 rounded-2xl space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                <Camera className="w-4 h-4 text-sky-600" />
-                Mandatory Jobcard Photo Capture *
-              </span>
-              {jobcardPhotoBase64 && (
+              <div>
+                <label className="text-xs font-bold text-sky-950 flex items-center gap-1.5 uppercase tracking-wider">
+                  <Camera className="w-4 h-4 text-sky-600" />
+                  Mandatory Jobcard Photo Capture *
+                </label>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Capture using device camera or upload a single clear photo of the physical job card sheet.
+                </p>
+              </div>
+              {jobcardPhotoBase64 && !isCameraActive && (
                 <button
                   type="button"
                   onClick={() => setJobcardPhotoBase64(null)}
-                  className="text-xs text-rose-600 font-bold hover:underline"
+                  className="text-xs text-rose-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
                 >
+                  <X className="w-3.5 h-3.5" />
                   Clear Photo
                 </button>
               )}
             </div>
 
-            {jobcardPhotoBase64 ? (
-              <div className="relative group max-w-xs mx-auto">
-                <img
-                  src={jobcardPhotoBase64}
-                  alt="Jobcard Preview"
-                  className="w-full h-44 object-cover rounded-xl border border-slate-200 shadow-xs"
-                />
+            {/* Hidden Single-File Input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple={false}
+              onChange={handlePhotoUpload}
+              className="hidden"
+            />
+
+            {/* VIEW 1: LIVE CAMERA STREAM VIEWPORT */}
+            {isCameraActive ? (
+              <div className="bg-slate-950 rounded-2xl p-3 border border-slate-800 text-white space-y-3 shadow-xl">
+                <div className="flex items-center justify-between text-xs px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="font-semibold text-slate-200">
+                      Camera Live ({cameraFacingMode === 'environment' ? 'Rear / Document Camera' : 'Front Camera'})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={toggleCameraFacing}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer"
+                      title="Switch Camera (Back/Front)"
+                    >
+                      <SwitchCamera className="w-3.5 h-3.5" />
+                      <span>Flip Camera</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+                      title="Close Camera"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {cameraError ? (
+                  <div className="p-4 bg-rose-500/20 border border-rose-500/40 rounded-xl text-xs text-rose-200 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{cameraError}</span>
+                  </div>
+                ) : (
+                  <div className="relative aspect-video max-h-72 w-full bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
+                    <video
+                      ref={(el) => {
+                        cameraVideoRef.current = el;
+                        if (el && cameraStreamRef.current && el.srcObject !== cameraStreamRef.current) {
+                          el.srcObject = cameraStreamRef.current;
+                          el.play().catch(console.error);
+                        }
+                      }}
+                      autoPlay
+                      playsInline
+                      muted
+                      className={`w-full h-full object-cover ${
+                        cameraFacingMode === 'user' ? 'scale-x-[-1]' : ''
+                      }`}
+                    />
+
+                    {/* Document Guide Frame Overlay */}
+                    <div className="absolute inset-4 sm:inset-6 border-2 border-dashed border-sky-400/60 rounded-xl pointer-events-none flex flex-col justify-between p-2">
+                      <div className="text-[10px] text-sky-200/90 font-mono tracking-wider bg-black/60 px-2 py-0.5 rounded self-start">
+                        FRAME JOBCARD SHEET HERE
+                      </div>
+                      <div className="text-[10px] text-sky-200/90 font-mono tracking-wider bg-black/60 px-2 py-0.5 rounded self-end">
+                        1 PHOTO ONLY
+                      </div>
+                    </div>
+
+                    {cameraLoading && (
+                      <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center gap-2 text-xs text-slate-300">
+                        <RefreshCw className="w-4 h-4 animate-spin text-sky-400" />
+                        <span>Initializing camera...</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-center gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={capturePhotoFromCamera}
+                    disabled={cameraLoading || !!cameraError}
+                    className="px-6 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-sky-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>Capture Photo</span>
+                  </button>
+                </div>
+              </div>
+            ) : jobcardPhotoBase64 ? (
+              /* VIEW 2: SINGLE PHOTO ATTACHED PREVIEW */
+              <div className="bg-white rounded-2xl p-4 border border-sky-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-100">
+                  <div className="flex items-center gap-1.5 text-emerald-700 font-bold">
+                    <CheckCircle className="w-4 h-4 text-emerald-600" />
+                    <span>1 Jobcard Photo Attached (Ready to submit)</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase bg-slate-100 px-2 py-0.5 rounded">
+                    Single Image Limit
+                  </span>
+                </div>
+
+                <div className="relative group max-w-sm mx-auto overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-inner">
+                  <img
+                    src={jobcardPhotoBase64}
+                    alt="Jobcard Preview"
+                    className="w-full h-52 object-contain bg-slate-900 rounded-xl"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => startCamera('environment')}
+                    className="px-3.5 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-sky-200 cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Retake with Camera</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-slate-200 cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload Different File</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setJobcardPhotoBase64(null)}
+                    className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-rose-200 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Remove</span>
+                  </button>
+                </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center p-6 bg-white border border-slate-200 rounded-xl text-center">
-                <Upload className="w-8 h-8 text-sky-500 mb-2" />
-                <p className="text-xs font-semibold text-slate-700">Capture or Upload Jobcard Photo</p>
-                <p className="text-[11px] text-slate-400 mb-3">Clear photo of the physical job card sheet</p>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handlePhotoUpload}
-                  className="text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100 cursor-pointer"
-                />
+              /* VIEW 3: OPTIONS TO CAPTURE OR UPLOAD (STRICTLY ONE IMAGE) */
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Option A: Device Camera */}
+                <button
+                  type="button"
+                  onClick={() => startCamera('environment')}
+                  className="flex flex-col items-center justify-center p-5 bg-white hover:bg-sky-50/70 border-2 border-dashed border-sky-300 hover:border-sky-500 rounded-2xl transition text-center cursor-pointer group shadow-xs hover:shadow-md"
+                >
+                  <div className="w-12 h-12 mb-2 rounded-2xl bg-sky-100 group-hover:bg-sky-500 text-sky-600 group-hover:text-white flex items-center justify-center transition shadow-xs">
+                    <Camera className="w-6 h-6" />
+                  </div>
+                  <span className="text-xs font-bold text-slate-800 group-hover:text-sky-900">
+                    Capture with Device Camera
+                  </span>
+                  <span className="text-[11px] text-slate-500 mt-0.5">
+                    Opens back camera for real-time document snap
+                  </span>
+                  <span className="mt-2 text-[10px] font-semibold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
+                    Instant Live Viewfinder
+                  </span>
+                </button>
+
+                {/* Option B: Upload File (Single file only) */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex flex-col items-center justify-center p-5 bg-white hover:bg-indigo-50/70 border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-2xl transition text-center cursor-pointer group shadow-xs hover:shadow-md"
+                >
+                  <div className="w-12 h-12 mb-2 rounded-2xl bg-slate-100 group-hover:bg-indigo-600 text-slate-600 group-hover:text-white flex items-center justify-center transition shadow-xs">
+                    <Upload className="w-6 h-6" />
+                  </div>
+                  <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-900">
+                    Upload from Device
+                  </span>
+                  <span className="text-[11px] text-slate-500 mt-0.5">
+                    Select 1 file from gallery or storage
+                  </span>
+                  <span className="mt-2 text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                    Single Image Only
+                  </span>
+                </button>
               </div>
             )}
           </div>
