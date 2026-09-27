@@ -102,9 +102,14 @@ export interface VehicleModel {
   Vehicle_Model: string;
 }
 
-// Local JSON File Database path for fallback
-const LOCAL_DB_DIR = path.resolve(process.cwd(), 'data');
+// Local JSON File Database path for fallback (use /tmp on serverless environments like Vercel)
+const LOCAL_DB_DIR = process.env.VERCEL
+  ? path.join('/tmp', 'premji_data')
+  : path.resolve(process.cwd(), 'data');
 const LOCAL_DB_PATH = path.join(LOCAL_DB_DIR, 'premji_store.json');
+
+// In-memory fallback database to guarantee zero crashes on read-only serverless environments
+let memoryDb: any = null;
 
 // MySQL Pool definition (instantiated lazily)
 let mysqlPool: any = null;
@@ -151,6 +156,10 @@ const hasMySqlConfig = () => {
 
 // Initialize connection pool if configured
 export async function initDatabase() {
+  if (mysqlPool) {
+    return; // Already initialized
+  }
+
   if (hasMySqlConfig()) {
     try {
       console.log('🔄 Attempting connection to Production MySQL Database...');
@@ -161,9 +170,10 @@ export async function initDatabase() {
         password: process.env.MYSQL_PASSWORD,
         database: process.env.MYSQL_DATABASE,
         waitForConnections: true,
-        connectionLimit: 15,
-        maxIdle: 10,
-        idleTimeout: 60000,
+        connectionLimit: 10,
+        maxIdle: 5,
+        idleTimeout: 30000,
+        connectTimeout: 7000, // 7s timeout for serverless
         queueLimit: 0,
         enableKeepAlive: true,
         keepAliveInitialDelay: 10000,
@@ -183,6 +193,7 @@ export async function initDatabase() {
       return;
     } catch (error) {
       console.error('❌ Failed to connect to Production MySQL. Falling back to Local Database.', error);
+      mysqlPool = null;
       useLocalDb = true;
     }
   } else {
@@ -190,15 +201,23 @@ export async function initDatabase() {
     useLocalDb = true;
   }
 
-  // Ensure Local Database exists
-  if (!fs.existsSync(LOCAL_DB_DIR)) {
-    fs.mkdirSync(LOCAL_DB_DIR, { recursive: true });
-  }
+  // Ensure Local Database directory and file exist safely (never throw on read-only environments)
+  try {
+    if (!fs.existsSync(LOCAL_DB_DIR)) {
+      fs.mkdirSync(LOCAL_DB_DIR, { recursive: true });
+    }
 
-  if (!fs.existsSync(LOCAL_DB_PATH)) {
-    console.log('🌱 Seeding local database JSON file...');
-    const seedData = getSeedData();
-    fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(seedData, null, 2), 'utf-8');
+    if (!fs.existsSync(LOCAL_DB_PATH)) {
+      console.log('🌱 Seeding local database JSON file...');
+      const seedData = getSeedData();
+      fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(seedData, null, 2), 'utf-8');
+      memoryDb = seedData;
+    }
+  } catch (fsErr) {
+    console.warn('⚠️ Note: Running in read-only environment or /tmp fallback. Using in-memory store.');
+    if (!memoryDb) {
+      memoryDb = getSeedData();
+    }
   }
 }
 
@@ -391,22 +410,30 @@ function getSeedData() {
   };
 }
 
-// JSON file helper functions
+// JSON file helper functions with memory cache fallback
 function readLocalDb(): any {
-  try {
-    const data = fs.readFileSync(LOCAL_DB_PATH, 'utf-8');
-    return JSON.parse(data);
-  } catch (err) {
-    console.error('Error reading local db, returning seeds', err);
-    return getSeedData();
+  if (memoryDb) {
+    return memoryDb;
   }
+  try {
+    if (fs.existsSync(LOCAL_DB_PATH)) {
+      const data = fs.readFileSync(LOCAL_DB_PATH, 'utf-8');
+      memoryDb = JSON.parse(data);
+      return memoryDb;
+    }
+  } catch (err) {
+    console.warn('Error reading local db file, falling back to memory seed', err);
+  }
+  memoryDb = getSeedData();
+  return memoryDb;
 }
 
 function writeLocalDb(data: any) {
+  memoryDb = data;
   try {
     fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
-    console.error('Error writing local db', err);
+    // Read-only filesystem warning is suppressed since memoryDb holds current state
   }
 }
 

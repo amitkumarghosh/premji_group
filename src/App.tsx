@@ -126,7 +126,13 @@ export default function App() {
         credentials: 'include',
         body: JSON.stringify({ employee_code: loginCode.trim(), password: loginPassword })
       });
-      const data = await res.json().catch(() => ({}));
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = {};
+      }
+
       if (res.ok && data.success) {
         if (data.token) {
           localStorage.setItem('premji_token', data.token);
@@ -136,7 +142,12 @@ export default function App() {
         setActiveTab('attendance');
         showNotification(`Welcome back, ${data.user.employee_name}!`, 'success');
       } else {
-        setLoginError(data.error || 'Authentication failed. Please verify employee code and password.');
+        const errorMsg = data.error || data.details || (
+          !res.ok
+            ? `Server Error (${res.status}): ${res.statusText || 'Unable to process login. Please check server logs and database connection.'}`
+            : 'Authentication failed. Please verify employee code and password.'
+        );
+        setLoginError(errorMsg);
       }
     } catch (e: any) {
       setLoginError(e?.message || 'Server connection error. Please try again.');

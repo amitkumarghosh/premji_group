@@ -3,7 +3,6 @@ import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 
 // Load environment variables
 dotenv.config();
@@ -22,11 +21,11 @@ export interface AuthenticatedRequest extends Request {
 }
 
 export async function createExpressApp() {
-  // Initialize DB Connection
+  // Initialize DB Connection safely
   await initDatabase();
 
   const app = express();
-  
+
   // High-performance payload limits for WebP Base64 camera uploads
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -82,6 +81,34 @@ export async function createExpressApp() {
       next();
     };
   };
+
+  // ==================== SYSTEM & DB DIAGNOSTICS ====================
+
+  app.get('/api/health', (req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      platform: process.env.VERCEL ? 'vercel-serverless' : 'node-server'
+    });
+  });
+
+  app.get('/api/db-status', async (req: Request, res: Response) => {
+    try {
+      const centers = await db.getAllCenters();
+      res.json({
+        success: true,
+        database: 'connected',
+        centers_count: centers.length,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: err.message || 'Database connection error'
+      });
+    }
+  });
 
   // ==================== AUTHENTICATION API ====================
 
@@ -1108,6 +1135,7 @@ export async function startServer() {
 
   if (!isProd) {
     console.log('⚡ Mounting Vite server middleware in development mode...');
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
@@ -1138,18 +1166,13 @@ export async function startServer() {
     });
   }
 
-  const PORT = Number(process.env.PORT || 3000);
+  const PORT = 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Premji Enterprise Portal ready at http://localhost:${PORT}`);
   });
 }
 
-const isDirectRun = process.argv[1] && (
-  process.argv[1].endsWith('server.ts') || 
-  process.argv[1].endsWith('server.js')
-);
-
-if (!process.env.VERCEL && isDirectRun) {
+if (!process.env.VERCEL) {
   startServer().catch((e) => {
     console.error('🔴 Critical Server Bootstrap Failure:', e);
   });
