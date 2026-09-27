@@ -1,4 +1,4 @@
-import { createExpressApp } from '../server.ts';
+import { createExpressApp } from '../src/app.ts';
 
 let appPromise: Promise<any> | null = null;
 
