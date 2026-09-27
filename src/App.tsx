@@ -47,13 +47,42 @@ interface CurrentUser {
   center_name: string | null;
 }
 
+// Robust role normalizer to guarantee seamless navigation across all role variants
+function normalizeUser(rawUser: any): CurrentUser | null {
+  if (!rawUser) return null;
+  const rawRole = String(rawUser.user_role || '').toLowerCase().replace(/[\s_-]+/g, '');
+  let normalizedRole: CurrentUser['user_role'] = 'Technician';
+  if (rawRole.includes('super')) {
+    normalizedRole = 'Super Admin';
+  } else if (rawRole.includes('admin')) {
+    normalizedRole = 'Admin';
+  } else if (rawRole.includes('lead') || rawRole === 'tl') {
+    normalizedRole = 'TeamLeader';
+  } else {
+    normalizedRole = 'Technician';
+  }
+
+  return {
+    employee_code: String(rawUser.employee_code || '').trim(),
+    employee_name: String(rawUser.employee_name || 'Staff Member').trim(),
+    user_role: normalizedRole,
+    center_code: rawUser.center_code || null,
+    center_name: rawUser.center_name || null
+  };
+}
+
 export default function App() {
+  // If there is no existing token, isVerifyingSession is immediately FALSE so Login renders on frame 1
+  const [isVerifyingSession, setIsVerifyingSession] = useState<boolean>(() => {
+    return !!(localStorage.getItem('premji_token') && localStorage.getItem('premji_user'));
+  });
+
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loginCode, setLoginCode] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
 
   // Active navigation tab
   const [activeTab, setActiveTab] = useState<ActiveTab>('attendance');
@@ -83,29 +112,41 @@ export default function App() {
   }, []);
 
   const checkSession = async () => {
+    const hasToken = localStorage.getItem('premji_token');
+    const hasUser = localStorage.getItem('premji_user');
+
+    if (!hasToken || !hasUser) {
+      setUser(null);
+      setIsVerifyingSession(false);
+      setAuthLoading(false);
+      return;
+    }
+
     try {
-      setAuthLoading(true);
       const res = await authFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
         if (data.user) {
-          setUser(data.user);
-          setActiveTab('attendance');
+          const validatedUser = normalizeUser(data.user);
+          setUser(validatedUser);
+          localStorage.setItem('premji_user', JSON.stringify(validatedUser));
+        } else {
+          localStorage.removeItem('premji_token');
+          localStorage.removeItem('premji_user');
+          setUser(null);
         }
       } else {
-        // If stored in localStorage, attempt re-login or clear
-        const savedUserStr = localStorage.getItem('premji_user');
-        if (savedUserStr) {
-          try {
-            const savedUser = JSON.parse(savedUserStr);
-            setUser(savedUser);
-            setActiveTab('attendance');
-          } catch {}
-        }
+        localStorage.removeItem('premji_token');
+        localStorage.removeItem('premji_user');
+        setUser(null);
       }
     } catch (e) {
       console.warn('Session check failed', e);
+      localStorage.removeItem('premji_token');
+      localStorage.removeItem('premji_user');
+      setUser(null);
     } finally {
+      setIsVerifyingSession(false);
       setAuthLoading(false);
     }
   };
@@ -134,13 +175,14 @@ export default function App() {
       }
 
       if (res.ok && data.success) {
+        const validatedUser = normalizeUser(data.user);
         if (data.token) {
           localStorage.setItem('premji_token', data.token);
         }
-        localStorage.setItem('premji_user', JSON.stringify(data.user));
-        setUser(data.user);
+        localStorage.setItem('premji_user', JSON.stringify(validatedUser));
+        setUser(validatedUser);
         setActiveTab('attendance');
-        showNotification(`Welcome back, ${data.user.employee_name}!`, 'success');
+        showNotification(`Welcome back, ${validatedUser?.employee_name}!`, 'success');
       } else {
         const errorMsg = data.error || data.details || (
           !res.ok
@@ -282,8 +324,31 @@ export default function App() {
 
   const navItems = getNavItems();
 
-  // AUTHENTICATION LOGIN SCREEN
-  if (!user && !authLoading) {
+  // HIGH-TECH BRANDED PROGRESS ANIMATION (While restoring existing session)
+  if (isVerifyingSession) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden text-white">
+        <div className="absolute top-1/4 -left-20 w-96 h-96 bg-sky-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="flex flex-col items-center max-w-sm text-center relative z-10">
+          <div className="w-16 h-16 mb-4 bg-gradient-to-tr from-sky-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-xl shadow-sky-500/25 animate-pulse">
+            <span className="text-3xl">🚗</span>
+          </div>
+          <h1 className="text-2xl font-black tracking-tight text-white">PREMJI GROUPS</h1>
+          <p className="text-xs text-sky-300 font-semibold tracking-wider uppercase mt-1">Enterprise Operations Portal</p>
+
+          <div className="w-56 h-1.5 bg-slate-800 rounded-full mt-6 overflow-hidden relative">
+            <div className="h-full bg-gradient-to-r from-sky-400 via-sky-300 to-indigo-500 rounded-full animate-indeterminate" />
+          </div>
+          <span className="text-[11px] text-slate-400 mt-3 font-medium">Connecting to secure workspace...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // AUTHENTICATION LOGIN SCREEN - Instant Landing Page when unauthenticated
+  if (!user) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
         {/* Ambient Aurora Gradient Orbs */}
@@ -345,9 +410,16 @@ export default function App() {
             <button
               type="submit"
               disabled={authLoading}
-              className="w-full py-3.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white rounded-xl font-bold tracking-wide transition shadow-lg shadow-sky-500/25 cursor-pointer mt-2 text-sm disabled:opacity-50"
+              className="w-full py-3.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white rounded-xl font-bold tracking-wide transition shadow-lg shadow-sky-500/25 cursor-pointer mt-2 text-sm disabled:opacity-60 flex items-center justify-center gap-2"
             >
-              Sign In to Workshop Portal
+              {authLoading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                  <span>Verifying & Loading Workspace...</span>
+                </>
+              ) : (
+                <span>Sign In to Workshop Portal</span>
+              )}
             </button>
           </form>
         </div>
@@ -528,6 +600,15 @@ export default function App() {
 
           {user && activeTab === 'profile' && (
             <ProfileView user={user} />
+          )}
+
+          {/* Safe Fallback: Guarantees main content view is never blank */}
+          {user && !['attendance', 'mark-other', 'workorders', 'create-update-wo', 'administration', 'admin-report', 'update-wo-status', 'profile'].includes(activeTab) && (
+            <AttendanceCapture
+              user={user}
+              onNotification={showNotification}
+              onInspectImage={setInspectImage}
+            />
           )}
         </main>
       </div>

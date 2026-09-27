@@ -388,7 +388,7 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
             Update Workorder Status
           </h2>
           <p className="text-xs text-slate-500 font-medium mt-1">
-            Search, edit details, or soft-delete active work orders (<code className="font-mono text-emerald-600">delete_flag = 0</code>).
+            Search, review details, update status, and manage active workshop work orders.
           </p>
         </div>
       </div>
@@ -496,7 +496,7 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
               {filteredOrders.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-400 italic">
-                    No active workorders found (delete_flag = 0).
+                    No active work orders found matching your criteria.
                   </td>
                 </tr>
               ) : (
@@ -820,8 +820,8 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
                 <AlertTriangle className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900">Soft-Delete Work Order</h3>
-                <p className="text-xs text-slate-500">This will set <code className="font-mono text-rose-600 font-bold">delete_flag = 1</code>.</p>
+                <h3 className="text-base font-bold text-slate-900">Remove Work Order</h3>
+                <p className="text-xs text-slate-500">This record will be safely archived from active work orders.</p>
               </div>
             </div>
 
@@ -851,7 +851,7 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
                 onClick={handleConfirmDelete}
                 className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-50"
               >
-                {submitting ? 'Deleting...' : 'Yes, Delete Record'}
+                {submitting ? 'Archiving...' : 'Yes, Remove Order'}
               </button>
             </div>
           </div>

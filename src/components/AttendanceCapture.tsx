@@ -73,22 +73,38 @@ export const AttendanceCapture: React.FC<AttendanceCaptureProps> = ({
 
   const currentStep = getStep();
 
-  // Initialize and maintain camera feed
+  // Initialize and maintain camera feed (Default: FRONT camera for attendance)
   const startCamera = async () => {
     setCameraError(null);
     if (cameraStream) {
       cameraStream.getTracks().forEach((t) => t.stop());
     }
 
+    const targetFacing = facingMode || 'user';
+
     try {
       let stream: MediaStream;
       try {
+        // Preferred: Front camera with ideal HD dimensions
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 1280 }, height: { ideal: 960 } },
+          video: {
+            facingMode: { ideal: targetFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
           audio: false
         });
-      } catch (e) {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      } catch (e1) {
+        try {
+          // Fallback: Front camera directly without resolution constraints
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: targetFacing },
+            audio: false
+          });
+        } catch (e2) {
+          // Last resort fallback
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
       }
 
       setCameraStream(stream);
@@ -176,7 +192,17 @@ export const AttendanceCapture: React.FC<AttendanceCaptureProps> = ({
       canvas.height = video.videoHeight || 480;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      if (facingMode === 'user') {
+        ctx.save();
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+
       const nowStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.fillRect(10, canvas.height - 40, 300, 30);
@@ -299,7 +325,9 @@ export const AttendanceCapture: React.FC<AttendanceCaptureProps> = ({
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover"
+                className={`w-full h-full object-cover transition-transform duration-200 ${
+                  facingMode === 'user' ? 'scale-x-[-1]' : ''
+                }`}
               />
 
               {/* Solid Cutout Mask: Hides everything outside the oval space, user sees ONLY inside the oval */}

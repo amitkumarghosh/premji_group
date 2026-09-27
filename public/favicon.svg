@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="50%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0284c7" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <!-- Background with subtle border -->
+  <rect width="64" height="64" rx="16" fill="url(#bgGrad)" />
+  <rect x="1" y="1" width="62" height="62" rx="15" stroke="rgba(255,255,255,0.12)" stroke-width="1.5" />
+  
+  <!-- Outer Tech Ring -->
+  <circle cx="32" cy="32" r="23" stroke="url(#blueGrad)" stroke-width="2.5" stroke-dasharray="8 3" opacity="0.85" />
+  
+  <!-- Core Emblem Hexagon / Shield -->
+  <path d="M32 14L47 22.5V41.5L32 50L17 41.5V22.5L32 14Z" fill="url(#blueGrad)" filter="url(#glow)" />
+  <path d="M32 16L45 23.5V40.5L32 48L19 40.5V23.5L32 16Z" fill="#0f172a" opacity="0.4" />
+  
+  <!-- Stylized Automotive 'P' -->
+  <path d="M25 21H34.5C38.6421 21 42 24.3579 42 28.5C42 32.6421 38.6421 36 34.5 36H29.5V44H25V21ZM29.5 32H34C35.933 32 37.5 30.433 37.5 28.5C37.5 26.567 35.933 25 34 25H29.5V32Z" fill="#ffffff" />
+  
+  <!-- Velocity Accent -->
+  <circle cx="43" cy="21" r="2.5" fill="#38bdf8" />
+</svg>
