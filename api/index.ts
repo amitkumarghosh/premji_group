@@ -8,9 +8,15 @@ export default async function handler(req: any, res: any) {
       appPromise = createExpressApp();
     }
     const app = await appPromise;
-    if (req.url && !req.url.startsWith('/api')) {
+    
+    // Normalize Vercel serverless request URL to match Express /api routes
+    const matchedPath = req.headers?.['x-matched-path'] || req.headers?.['x-forwarded-uri'];
+    if (matchedPath && matchedPath.startsWith('/api')) {
+      req.url = matchedPath;
+    } else if (req.url && !req.url.startsWith('/api')) {
       req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
     }
+    
     return app(req, res);
   } catch (err: any) {
     console.error('Fatal Serverless Handler Error:', err);

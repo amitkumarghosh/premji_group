@@ -173,14 +173,17 @@ export async function initDatabase() {
         connectionLimit: 10,
         maxIdle: 5,
         idleTimeout: 30000,
-        connectTimeout: 7000, // 7s timeout for serverless
+        connectTimeout: 3500, // 3.5s timeout for serverless
         queueLimit: 0,
         enableKeepAlive: true,
         keepAliveInitialDelay: 10000,
         dateStrings: true,
       });
-      // Test the pool and check table columns
-      const conn = await mysqlPool.getConnection();
+      // Strict timeout protection so serverless lambdas never hang
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('MySQL connection handshake timeout (3.5s limit reached)')), 3500)
+      );
+      const conn: any = await Promise.race([mysqlPool.getConnection(), timeoutPromise]);
       console.log('✅ Connected to Production MySQL Database successfully!');
       try {
         const [cols]: any = await conn.execute('DESCRIBE preamji_attendance');

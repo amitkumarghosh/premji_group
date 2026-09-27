@@ -13,14 +13,20 @@ const SFTP_CONFIG: Client.ConnectOptions = {
 };
 
 const REMOTE_BASE_DIR = process.env.SFTP_REMOTE_BASE || '/var/www/premji';
-const LOCAL_UPLOADS_DIR = path.resolve(process.cwd(), 'data', 'uploads');
+const LOCAL_UPLOADS_DIR = process.env.VERCEL
+  ? path.join('/tmp', 'premji_uploads')
+  : path.resolve(process.cwd(), 'data', 'uploads');
 
 // In-memory negative cache for missing files to prevent repeated failed network roundtrips
 const missingFilesCache = new Set<string>();
 
-// Ensure local uploads folder exists
-if (!fs.existsSync(LOCAL_UPLOADS_DIR)) {
-  fs.mkdirSync(LOCAL_UPLOADS_DIR, { recursive: true });
+// Ensure local uploads folder exists safely
+try {
+  if (!fs.existsSync(LOCAL_UPLOADS_DIR)) {
+    fs.mkdirSync(LOCAL_UPLOADS_DIR, { recursive: true });
+  }
+} catch (e) {
+  // Gracefully continue on read-only environments
 }
 
 // Helper to check SFTP config
