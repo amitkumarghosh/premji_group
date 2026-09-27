@@ -92,14 +92,17 @@ export async function createExpressApp() {
         return res.status(400).json({ error: 'Employee code and password are required' });
       }
 
-      const emp = await db.getEmployeeByCode(employee_code);
+      const cleanCode = String(employee_code).trim();
+      const cleanPass = String(password);
+
+      const emp = await db.getEmployeeByCode(cleanCode);
       if (!emp) {
-        return res.status(401).json({ error: 'Invalid employee code or inactive status' });
+        return res.status(401).json({ error: 'Invalid employee code or inactive account status' });
       }
 
-      // Simple secure password comparison (plain or SHA hashed)
-      if (emp.password !== password) {
-        return res.status(401).json({ error: 'Incorrect password' });
+      // Password comparison (direct or trimmed)
+      if (emp.password !== cleanPass && emp.password?.trim() !== cleanPass.trim()) {
+        return res.status(401).json({ error: 'Incorrect password. Please check your credentials or show password to verify.' });
       }
 
       // Create JWT session

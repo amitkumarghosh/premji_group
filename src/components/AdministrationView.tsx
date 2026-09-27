@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Users, Building, Plus, Search, Download, CheckCircle, RefreshCw, Edit, ShieldAlert } from 'lucide-react';
+import { Settings, Users, Building, Plus, Search, Download, CheckCircle, RefreshCw, Edit, ShieldAlert, Eye, EyeOff } from 'lucide-react';
 import { authFetch } from '../utils/api';
 
 interface AdministrationViewProps {
@@ -23,6 +23,8 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   // User search/edit state
   const [userSearch, setUserSearch] = useState('');
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
+  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [editUserData, setEditUserData] = useState({
     employee_name: '',
     user_role: '',
@@ -423,13 +425,23 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                     </div>
                     <div>
                       <label className="block font-bold text-slate-700 mb-1">Reset Password</label>
-                      <input
-                        type="password"
-                        placeholder="Leave blank to keep"
-                        value={editUserData.password}
-                        onChange={(e) => setEditUserData({ ...editUserData, password: e.target.value })}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
-                      />
+                      <div className="relative">
+                        <input
+                          type={showEditPassword ? 'text' : 'password'}
+                          placeholder="Leave blank to keep"
+                          value={editUserData.password}
+                          onChange={(e) => setEditUserData({ ...editUserData, password: e.target.value })}
+                          className="w-full pl-3 pr-9 py-2 bg-white border border-slate-200 rounded-lg"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowEditPassword(!showEditPassword)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                          title={showEditPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showEditPassword ? <EyeOff className="w-4 h-4 text-sky-600" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -464,14 +476,24 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   </div>
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Password *</label>
-                    <input
-                      required
-                      type="password"
-                      placeholder="Password"
-                      value={newUser.password}
-                      onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
-                    />
+                    <div className="relative">
+                      <input
+                        required
+                        type={showNewUserPassword ? 'text' : 'password'}
+                        placeholder="Password"
+                        value={newUser.password}
+                        onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                        className="w-full pl-3 pr-9 py-2 bg-white border border-slate-200 rounded-lg"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                        title={showNewUserPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showNewUserPassword ? <EyeOff className="w-4 h-4 text-sky-600" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
