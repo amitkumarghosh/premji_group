@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 // Load environment variables
 dotenv.config();
 
-import { initDatabase, db } from './db/db_adapter.ts';
+import { initDatabase, db, isConnectionError } from './db/db_adapter.ts';
 import { sftpStorage } from './db/sftp_adapter.ts';
 import { jwtUtil, type JwtPayload } from './db/jwt.ts';
 
@@ -169,7 +169,11 @@ export async function createExpressApp() {
       });
     } catch (err: any) {
       console.error('Login error:', err);
-      return res.status(500).json({ error: 'Internal server error during login' });
+      const isTimeout = isConnectionError(err) || String(err?.message || '').includes('ETIMEDOUT');
+      const errorMsg = isTimeout
+        ? 'Database connection timed out. Please try logging in again in a moment.'
+        : (err?.message || 'Internal server error during login');
+      return res.status(500).json({ error: errorMsg });
     }
   });
 

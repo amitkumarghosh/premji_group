@@ -98,8 +98,10 @@ export interface CenterDetails {
 
 export interface VehicleModel {
   id?: number;
+  ID?: number;
   Vehicle_Manufacturer: string;
   Vehicle_Model: string;
+  delete_flag?: number;
 }
 
 // Local JSON File Database path for fallback (use /tmp on serverless environments like Vercel)
@@ -154,6 +156,74 @@ const hasMySqlConfig = () => {
   );
 };
 
+// Periodic keepalive timer to keep socket active through cloud firewalls
+let keepAliveTimer: any = null;
+function startKeepAlivePing() {
+  if (keepAliveTimer) return;
+  keepAliveTimer = setInterval(async () => {
+    if (mysqlPool && !useLocalDb) {
+      try {
+        await mysqlPool.query('SELECT 1');
+      } catch {
+        // silent ping error handling
+      }
+    }
+  }, 45000);
+  if (typeof keepAliveTimer.unref === 'function') {
+    keepAliveTimer.unref();
+  }
+}
+
+// Error discriminator for connection/socket drop issues
+export function isConnectionError(err: any): boolean {
+  if (!err) return false;
+  const code = String(err.code || '');
+  const msg = String(err.message || '');
+  return (
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNREFUSED' ||
+    code === 'ECONNRESET' ||
+    code === 'PROTOCOL_CONNECTION_LOST' ||
+    code === 'EHOSTUNREACH' ||
+    code === 'ENETUNREACH' ||
+    code === 'HANDSHAKE_TIMEOUT' ||
+    code === 'ER_SERVER_SHUTDOWN' ||
+    code === 'ER_CON_COUNT_ERROR' ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('connect ETIMEDOUT') ||
+    msg.includes('Connection lost') ||
+    msg.includes('handshake timeout') ||
+    msg.includes('closed')
+  );
+}
+
+// Resilient query executor with automatic retry on transient connection drops
+export async function executeWithRetry<T = any>(
+  sql: string,
+  params: any[] = [],
+  maxRetries = 1
+): Promise<[T, any]> {
+  if (!mysqlPool) {
+    throw new Error('MySQL connection pool not available');
+  }
+
+  let lastError: any = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await mysqlPool.execute(sql, params);
+    } catch (err: any) {
+      lastError = err;
+      if (isConnectionError(err) && attempt < maxRetries) {
+        console.warn(`⚠️ MySQL query connection error (${err.message}). Retrying in 600ms (attempt ${attempt + 1}/${maxRetries})...`);
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
 // Initialize connection pool if configured
 export async function initDatabase() {
   if (mysqlPool) {
@@ -171,17 +241,17 @@ export async function initDatabase() {
         database: process.env.MYSQL_DATABASE,
         waitForConnections: true,
         connectionLimit: 10,
-        maxIdle: 5,
-        idleTimeout: 30000,
-        connectTimeout: 3500, // 3.5s timeout for serverless
+        maxIdle: 10,
+        idleTimeout: 300000, // 5 minutes idle keepalive
+        connectTimeout: 15000, // 15s timeout for remote cloud MySQL (prevents connect ETIMEDOUT)
         queueLimit: 0,
         enableKeepAlive: true,
-        keepAliveInitialDelay: 10000,
+        keepAliveInitialDelay: 5000,
         dateStrings: true,
       });
-      // Strict timeout protection so serverless lambdas never hang
+      // Generous timeout protection to allow cross-region handshakes without premature abort
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('MySQL connection handshake timeout (3.5s limit reached)')), 3500)
+        setTimeout(() => reject(new Error('MySQL connection handshake timeout (15s limit reached)')), 15000)
       );
       const conn: any = await Promise.race([mysqlPool.getConnection(), timeoutPromise]);
       console.log('✅ Connected to Production MySQL Database successfully!');
@@ -193,9 +263,17 @@ export async function initDatabase() {
       }
       conn.release();
       useLocalDb = false;
+
+      // Start periodic ping so connection is kept active
+      startKeepAlivePing();
       return;
     } catch (error) {
       console.error('❌ Failed to connect to Production MySQL. Falling back to Local Database.', error);
+      if (mysqlPool) {
+        try {
+          await mysqlPool.end();
+        } catch {}
+      }
       mysqlPool = null;
       useLocalDb = true;
     }
@@ -495,32 +573,40 @@ export const db = {
   // 1. Employee Auth & Details
   async getEmployeeByCode(code: string, activeOnly = false): Promise<EmployeeDetails | null> {
     if (!useLocalDb && mysqlPool) {
-      let query = 'SELECT * FROM employee_details WHERE employee_code = ?';
-      if (activeOnly) {
-        query += ' AND employee_status IN ("Active", "1")';
+      try {
+        let query = 'SELECT * FROM employee_details WHERE employee_code = ?';
+        if (activeOnly) {
+          query += ' AND employee_status IN ("Active", "1")';
+        }
+        query += ' LIMIT 1';
+        const [rows]: any = await executeWithRetry(query, [code]);
+        if (rows && rows.length > 0 && rows[0]) {
+          return cleanRowBuffers(rows[0]);
+        }
+      } catch (err: any) {
+        console.warn('⚠️ MySQL getEmployeeByCode error, falling back to local DB:', err?.message || err);
       }
-      query += ' LIMIT 1';
-      const [rows]: any = await mysqlPool.execute(query, [code]);
-      return rows[0] ? cleanRowBuffers(rows[0]) : null;
-    } else {
-      const store = readLocalDb();
-      const emp = store.employee_details.find(
-        (e: any) =>
-          e.employee_code.toUpperCase() === code.toUpperCase() &&
-          (!activeOnly || e.employee_status === 'Active' || e.employee_status === '1')
-      );
-      return emp || null;
     }
+    const store = readLocalDb();
+    const emp = store.employee_details.find(
+      (e: any) =>
+        e.employee_code.toUpperCase() === code.toUpperCase() &&
+        (!activeOnly || e.employee_status === 'Active' || e.employee_status === '1')
+    );
+    return emp || null;
   },
 
   async getAllEmployees(): Promise<EmployeeDetails[]> {
     if (!useLocalDb && mysqlPool) {
-      const [rows]: any = await mysqlPool.execute('SELECT * FROM employee_details ORDER BY id DESC');
-      return cleanRowBuffers(rows);
-    } else {
-      const store = readLocalDb();
-      return store.employee_details;
+      try {
+        const [rows]: any = await executeWithRetry('SELECT * FROM employee_details ORDER BY id DESC');
+        return cleanRowBuffers(rows);
+      } catch (err: any) {
+        console.warn('⚠️ MySQL getAllEmployees error, falling back to local DB:', err?.message || err);
+      }
     }
+    const store = readLocalDb();
+    return store.employee_details;
   },
 
   async createEmployee(employee: Partial<EmployeeDetails>): Promise<number> {
@@ -603,21 +689,24 @@ export const db = {
   // 2. Attendance & Checkpoint operations
   async getTodayAttendance(empCode: string, dateStr: string): Promise<PremjiAttendance | null> {
     if (!useLocalDb && mysqlPool) {
-      const [rows]: any = await mysqlPool.execute(
-        `SELECT a.*, e.center_code, e.center_name 
-         FROM preamji_attendance a 
-         LEFT JOIN employee_details e ON a.emp_code_of_thetechnician = e.employee_code 
-         WHERE a.emp_code_of_thetechnician = ? AND a.attendance_date = ? LIMIT 1`,
-        [empCode, dateStr]
-      );
-      return rows[0] ? cleanRowBuffers(rows[0]) : null;
-    } else {
-      const store = readLocalDb();
-      const attendance = store.preamji_attendance.find(
-        (a: any) => a.emp_code_of_thetechnician === empCode && a.attendance_date === dateStr
-      );
-      return attendance || null;
+      try {
+        const [rows]: any = await executeWithRetry(
+          `SELECT a.*, e.center_code, e.center_name 
+           FROM preamji_attendance a 
+           LEFT JOIN employee_details e ON a.emp_code_of_thetechnician = e.employee_code 
+           WHERE a.emp_code_of_thetechnician = ? AND a.attendance_date = ? LIMIT 1`,
+          [empCode, dateStr]
+        );
+        return rows[0] ? cleanRowBuffers(rows[0]) : null;
+      } catch (err: any) {
+        console.warn('⚠️ MySQL getTodayAttendance error, falling back to local DB:', err?.message || err);
+      }
     }
+    const store = readLocalDb();
+    const attendance = store.preamji_attendance.find(
+      (a: any) => a.emp_code_of_thetechnician === empCode && a.attendance_date === dateStr
+    );
+    return attendance || null;
   },
 
   async markAttendance(attendance: Partial<PremjiAttendance>): Promise<boolean> {
@@ -626,7 +715,7 @@ export const db = {
 
     if (!useLocalDb && mysqlPool) {
       // Look up if existing record
-      const [rows]: any = await mysqlPool.execute(
+      const [rows]: any = await executeWithRetry(
         'SELECT id FROM preamji_attendance WHERE emp_code_of_thetechnician = ? AND attendance_date = ? LIMIT 1',
         [empCode, dateStr]
       );
@@ -896,31 +985,37 @@ export const db = {
       }
 
       if (filters.startDate) {
-        query += ' AND (job_assign_date >= ? OR jobcard_date >= ?)';
-        countQuery += ' AND (job_assign_date >= ? OR jobcard_date >= ?)';
-        params.push(filters.startDate, filters.startDate);
-        countParams.push(filters.startDate, filters.startDate);
+        query += ' AND COALESCE(jobcard_date, job_assign_date) >= ?';
+        countQuery += ' AND COALESCE(jobcard_date, job_assign_date) >= ?';
+        params.push(filters.startDate);
+        countParams.push(filters.startDate);
       }
 
       if (filters.endDate) {
-        query += ' AND (job_assign_date <= ? OR jobcard_date <= ?)';
-        countQuery += ' AND (job_assign_date <= ? OR jobcard_date <= ?)';
-        params.push(filters.endDate, filters.endDate);
-        countParams.push(filters.endDate, filters.endDate);
+        query += ' AND COALESCE(jobcard_date, job_assign_date) <= ?';
+        countQuery += ' AND COALESCE(jobcard_date, job_assign_date) <= ?';
+        params.push(filters.endDate);
+        countParams.push(filters.endDate);
       }
 
-      query += ' ORDER BY COALESCE(job_assign_date, jobcard_date) DESC, id DESC LIMIT ? OFFSET ?';
+      query += ' ORDER BY COALESCE(jobcard_date, job_assign_date) DESC, id DESC LIMIT ? OFFSET ?';
       params.push(limit, offset);
 
-      const [rows]: any = await mysqlPool.execute(query, params);
-      const [countRows]: any = await mysqlPool.execute(countQuery, countParams);
+      try {
+        const [rows]: any = await executeWithRetry(query, params);
+        const [countRows]: any = await executeWithRetry(countQuery, countParams);
 
-      return {
-        data: cleanRowBuffers(rows),
-        total: countRows[0]?.total || 0
-      };
-    } else {
-      const store = readLocalDb();
+        return {
+          data: cleanRowBuffers(rows),
+          total: countRows[0]?.total || 0
+        };
+      } catch (err: any) {
+        console.warn('⚠️ MySQL getWorkOrders error, falling back to local DB:', err?.message || err);
+      }
+    }
+    
+    // Local DB fallback
+    const store = readLocalDb();
       let records: WorkorderEntry[] = [...(store.workorder_entry || [])].filter(
         (r: any) => r.delete_flag !== 1 && r.delete_flag !== '1'
       );
@@ -955,23 +1050,22 @@ export const db = {
       }
 
       if (filters.startDate) {
-        records = records.filter(r => (r.job_assign_date || r.jobcard_date) >= filters.startDate!);
+        records = records.filter(r => (r.jobcard_date || r.job_assign_date || '') >= filters.startDate!);
       }
 
       if (filters.endDate) {
-        records = records.filter(r => (r.job_assign_date || r.jobcard_date) <= filters.endDate!);
+        records = records.filter(r => (r.jobcard_date || r.job_assign_date || '') <= filters.endDate!);
       }
 
       const total = records.length;
       const sortedRecords = records
-        .sort((a, b) => (b.job_assign_date || b.jobcard_date).localeCompare(a.job_assign_date || a.jobcard_date) || ((b.id || 0) - (a.id || 0)))
+        .sort((a, b) => (b.jobcard_date || b.job_assign_date || '').localeCompare(a.jobcard_date || a.job_assign_date || '') || ((b.id || 0) - (a.id || 0)))
         .slice(offset, offset + limit);
 
       return {
         data: sortedRecords,
         total
       };
-    }
   },
 
   async getWorkOrderById(id: number): Promise<WorkorderEntry | null> {
@@ -1474,12 +1568,15 @@ export const db = {
   // 4. Center management
   async getAllCenters(): Promise<CenterDetails[]> {
     if (!useLocalDb && mysqlPool) {
-      const [rows]: any = await mysqlPool.execute('SELECT * FROM center_details WHERE status = "Active"');
-      return cleanRowBuffers(rows);
-    } else {
-      const store = readLocalDb();
-      return store.center_details.filter((c: any) => c.status === 'Active');
+      try {
+        const [rows]: any = await executeWithRetry('SELECT * FROM center_details WHERE status = "Active"');
+        return cleanRowBuffers(rows);
+      } catch (err: any) {
+        console.warn('⚠️ MySQL getAllCenters error, falling back to local DB:', err?.message || err);
+      }
     }
+    const store = readLocalDb();
+    return store.center_details.filter((c: any) => c.status === 'Active');
   },
 
   async createCenter(center: Partial<CenterDetails>): Promise<string> {
@@ -1545,18 +1642,22 @@ export const db = {
     }
   },
 
-  // 5. Vehicle Model details
+  // 5. Vehicle Model details (Filtered by delete_flag = 0)
   async getVehicleModels(): Promise<VehicleModel[]> {
     if (!useLocalDb && mysqlPool) {
-      const [rows]: any = await mysqlPool.execute('SELECT * FROM vehicle_model ORDER BY Vehicle_Manufacturer ASC, Vehicle_Model ASC');
+      const [rows]: any = await mysqlPool.execute(
+        'SELECT * FROM vehicle_model WHERE (delete_flag = 0 OR delete_flag IS NULL) ORDER BY Vehicle_Manufacturer ASC, Vehicle_Model ASC'
+      );
       return cleanRowBuffers(rows);
     } else {
       const store = readLocalDb();
-      return [...(store.vehicle_model || [])].sort((a: any, b: any) => {
-        const mfrDiff = (a.Vehicle_Manufacturer || '').localeCompare(b.Vehicle_Manufacturer || '');
-        if (mfrDiff !== 0) return mfrDiff;
-        return (a.Vehicle_Model || '').localeCompare(b.Vehicle_Model || '');
-      });
+      return [...(store.vehicle_model || [])]
+        .filter((vm: any) => vm.delete_flag !== 1 && vm.delete_flag !== '1')
+        .sort((a: any, b: any) => {
+          const mfrDiff = (a.Vehicle_Manufacturer || '').localeCompare(b.Vehicle_Manufacturer || '');
+          if (mfrDiff !== 0) return mfrDiff;
+          return (a.Vehicle_Model || '').localeCompare(b.Vehicle_Model || '');
+        });
     }
   },
 
@@ -1573,13 +1674,27 @@ export const db = {
     }
 
     if (!useLocalDb && mysqlPool) {
-      // Check duplicate (case-insensitive & trimmed)
-      const [existing]: any = await mysqlPool.execute(
-        'SELECT ID FROM vehicle_model WHERE LOWER(TRIM(Vehicle_Manufacturer)) = LOWER(TRIM(?)) AND LOWER(TRIM(Vehicle_Model)) = LOWER(TRIM(?)) LIMIT 1',
+      // Check duplicate only against active records (delete_flag = 0 or NULL)
+      const [existingActive]: any = await mysqlPool.execute(
+        'SELECT ID FROM vehicle_model WHERE LOWER(TRIM(Vehicle_Manufacturer)) = LOWER(TRIM(?)) AND LOWER(TRIM(Vehicle_Model)) = LOWER(TRIM(?)) AND (delete_flag = 0 OR delete_flag IS NULL) LIMIT 1',
         [cleanMfr, cleanModel]
       );
-      if (existing.length > 0) {
+      if (existingActive.length > 0) {
         return { success: false, error: `Duplicate detected: "${cleanMfr} - ${cleanModel}" already exists in the vehicle database.` };
+      }
+
+      // If a previously deleted record with delete_flag = 1 exists, reactivate it to 0
+      const [existingDeleted]: any = await mysqlPool.execute(
+        'SELECT ID FROM vehicle_model WHERE LOWER(TRIM(Vehicle_Manufacturer)) = LOWER(TRIM(?)) AND LOWER(TRIM(Vehicle_Model)) = LOWER(TRIM(?)) AND delete_flag = 1 LIMIT 1',
+        [cleanMfr, cleanModel]
+      );
+      if (existingDeleted.length > 0) {
+        const reactivateId = existingDeleted[0].ID;
+        await mysqlPool.execute(
+          'UPDATE vehicle_model SET delete_flag = 0 WHERE ID = ?',
+          [reactivateId]
+        );
+        return { success: true, id: reactivateId };
       }
 
       // Check max ID in case ID is not auto_increment
@@ -1593,13 +1708,13 @@ export const db = {
       try {
         if (nextId) {
           const [res]: any = await mysqlPool.execute(
-            'INSERT INTO vehicle_model (ID, Vehicle_Manufacturer, Vehicle_Model) VALUES (?, ?, ?)',
+            'INSERT INTO vehicle_model (ID, Vehicle_Manufacturer, Vehicle_Model, delete_flag) VALUES (?, ?, ?, 0)',
             [nextId, cleanMfr, cleanModel]
           );
           insertId = res.insertId || nextId;
         } else {
           const [res]: any = await mysqlPool.execute(
-            'INSERT INTO vehicle_model (Vehicle_Manufacturer, Vehicle_Model) VALUES (?, ?)',
+            'INSERT INTO vehicle_model (Vehicle_Manufacturer, Vehicle_Model, delete_flag) VALUES (?, ?, 0)',
             [cleanMfr, cleanModel]
           );
           insertId = res.insertId;
@@ -1607,7 +1722,7 @@ export const db = {
       } catch (err: any) {
         // Fallback without ID column if auto_increment handles it
         const [res]: any = await mysqlPool.execute(
-          'INSERT INTO vehicle_model (Vehicle_Manufacturer, Vehicle_Model) VALUES (?, ?)',
+          'INSERT INTO vehicle_model (Vehicle_Manufacturer, Vehicle_Model, delete_flag) VALUES (?, ?, 0)',
           [cleanMfr, cleanModel]
         );
         insertId = res.insertId || nextId;
@@ -1618,21 +1733,38 @@ export const db = {
       const store = readLocalDb();
       if (!store.vehicle_model) store.vehicle_model = [];
 
-      const duplicate = store.vehicle_model.some(
+      // Check duplicate only against active records
+      const activeDuplicate = store.vehicle_model.some(
         (vm: any) =>
+          vm.delete_flag !== 1 && vm.delete_flag !== '1' &&
           vm.Vehicle_Manufacturer?.trim().toLowerCase() === cleanMfr.toLowerCase() &&
           vm.Vehicle_Model?.trim().toLowerCase() === cleanModel.toLowerCase()
       );
 
-      if (duplicate) {
+      if (activeDuplicate) {
         return { success: false, error: `Duplicate detected: "${cleanMfr} - ${cleanModel}" already exists in the vehicle database.` };
+      }
+
+      // If a deleted record exists, un-flag it
+      const deletedIdx = store.vehicle_model.findIndex(
+        (vm: any) =>
+          (vm.delete_flag === 1 || vm.delete_flag === '1') &&
+          vm.Vehicle_Manufacturer?.trim().toLowerCase() === cleanMfr.toLowerCase() &&
+          vm.Vehicle_Model?.trim().toLowerCase() === cleanModel.toLowerCase()
+      );
+
+      if (deletedIdx !== -1) {
+        store.vehicle_model[deletedIdx].delete_flag = 0;
+        writeLocalDb(store);
+        return { success: true, id: store.vehicle_model[deletedIdx].id || store.vehicle_model[deletedIdx].ID };
       }
 
       const nextId = store.vehicle_model.length > 0 ? Math.max(...store.vehicle_model.map((m: any) => m.id || m.ID || 0)) + 1 : 1;
       const newModel: VehicleModel = {
         id: nextId,
         Vehicle_Manufacturer: cleanMfr,
-        Vehicle_Model: cleanModel
+        Vehicle_Model: cleanModel,
+        delete_flag: 0
       };
 
       store.vehicle_model.push(newModel);
@@ -1650,9 +1782,9 @@ export const db = {
     }
 
     if (!useLocalDb && mysqlPool) {
-      // Check duplicate on other records
+      // Check duplicate on other active records
       const [existing]: any = await mysqlPool.execute(
-        'SELECT ID FROM vehicle_model WHERE LOWER(TRIM(Vehicle_Manufacturer)) = LOWER(TRIM(?)) AND LOWER(TRIM(Vehicle_Model)) = LOWER(TRIM(?)) AND ID != ? LIMIT 1',
+        'SELECT ID FROM vehicle_model WHERE LOWER(TRIM(Vehicle_Manufacturer)) = LOWER(TRIM(?)) AND LOWER(TRIM(Vehicle_Model)) = LOWER(TRIM(?)) AND ID != ? AND (delete_flag = 0 OR delete_flag IS NULL) LIMIT 1',
         [cleanMfr, cleanModel, id]
       );
       if (existing.length > 0) {
@@ -1671,6 +1803,7 @@ export const db = {
       const duplicate = store.vehicle_model.some(
         (vm: any) =>
           (vm.id || vm.ID) !== id &&
+          vm.delete_flag !== 1 && vm.delete_flag !== '1' &&
           vm.Vehicle_Manufacturer?.trim().toLowerCase() === cleanMfr.toLowerCase() &&
           vm.Vehicle_Model?.trim().toLowerCase() === cleanModel.toLowerCase()
       );
@@ -1695,45 +1828,57 @@ export const db = {
     }
   },
 
+  // Soft delete using delete_flag = 1 (since MySQL user has no DELETE grant)
   async deleteVehicleModel(id: number): Promise<{ success: boolean; error?: string }> {
     if (!useLocalDb && mysqlPool) {
-      const [res]: any = await mysqlPool.execute('DELETE FROM vehicle_model WHERE ID = ?', [id]);
+      const [res]: any = await executeWithRetry('UPDATE vehicle_model SET delete_flag = 1 WHERE ID = ?', [id]);
       return { success: res.affectedRows > 0 };
     } else {
       const store = readLocalDb();
       if (!store.vehicle_model) return { success: false };
-      const beforeLen = store.vehicle_model.length;
-      store.vehicle_model = store.vehicle_model.filter((vm: any) => (vm.id || vm.ID) !== id);
+      const idx = store.vehicle_model.findIndex((vm: any) => (vm.id || vm.ID) === id);
+      if (idx === -1) return { success: false, error: 'Record not found' };
+      store.vehicle_model[idx].delete_flag = 1;
       writeLocalDb(store);
-      return { success: store.vehicle_model.length < beforeLen };
+      return { success: true };
     }
   },
 
   async getDistinctManufacturers(): Promise<string[]> {
     if (!useLocalDb && mysqlPool) {
-      const [rows]: any = await mysqlPool.execute('SELECT DISTINCT Vehicle_Manufacturer FROM vehicle_model ORDER BY Vehicle_Manufacturer ASC');
-      return rows.map((r: any) => r.Vehicle_Manufacturer);
-    } else {
-      const store = readLocalDb();
-      const manufacturers = Array.from(new Set(store.vehicle_model.map((vm: any) => vm.Vehicle_Manufacturer))) as string[];
-      return manufacturers.sort();
+      try {
+        const [rows]: any = await executeWithRetry(
+          'SELECT DISTINCT Vehicle_Manufacturer FROM vehicle_model WHERE (delete_flag = 0 OR delete_flag IS NULL) ORDER BY Vehicle_Manufacturer ASC'
+        );
+        return rows.map((r: any) => r.Vehicle_Manufacturer);
+      } catch (err: any) {
+        console.warn('⚠️ MySQL getDistinctManufacturers error, falling back to local DB:', err?.message || err);
+      }
     }
+    const store = readLocalDb();
+    const active = (store.vehicle_model || []).filter((vm: any) => vm.delete_flag !== 1 && vm.delete_flag !== '1');
+    const manufacturers = Array.from(new Set(active.map((vm: any) => vm.Vehicle_Manufacturer))) as string[];
+    return manufacturers.sort();
   },
 
   async getModelsForManufacturer(manufacturer: string): Promise<string[]> {
     if (!useLocalDb && mysqlPool) {
-      const [rows]: any = await mysqlPool.execute(
-        'SELECT Vehicle_Model FROM vehicle_model WHERE Vehicle_Manufacturer = ? ORDER BY Vehicle_Model ASC',
-        [manufacturer]
-      );
-      return rows.map((r: any) => r.Vehicle_Model);
-    } else {
-      const store = readLocalDb();
-      const models = store.vehicle_model
-        .filter((vm: any) => vm.Vehicle_Manufacturer === manufacturer)
-        .map((vm: any) => vm.Vehicle_Model);
-      return models.sort();
+      try {
+        const [rows]: any = await executeWithRetry(
+          'SELECT Vehicle_Model FROM vehicle_model WHERE Vehicle_Manufacturer = ? AND (delete_flag = 0 OR delete_flag IS NULL) ORDER BY Vehicle_Model ASC',
+          [manufacturer]
+        );
+        return rows.map((r: any) => r.Vehicle_Model);
+      } catch (err: any) {
+        console.warn('⚠️ MySQL getModelsForManufacturer error, falling back to local DB:', err?.message || err);
+      }
     }
+    const store = readLocalDb();
+    const active = (store.vehicle_model || []).filter((vm: any) => vm.delete_flag !== 1 && vm.delete_flag !== '1');
+    const models = active
+      .filter((vm: any) => vm.Vehicle_Manufacturer === manufacturer)
+      .map((vm: any) => vm.Vehicle_Model);
+    return models.sort();
   },
 
   // 6. 31-Day image retention automated cleanup

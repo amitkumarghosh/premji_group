@@ -308,14 +308,14 @@ export default function App() {
       ];
     }
 
-    // Admin & Super Admin: Includes direct navigation to Update Vehicle Model & Variant
+    // Admin & Super Admin: Direct navigation to Vehicle Model & Variant above Profile
     return [
       { id: 'attendance', label: 'Attendance', icon: Clock },
       { id: 'administration', label: 'Administration', icon: Settings },
-      { id: 'vehicle-models', label: 'Vehicle Model & Variant', icon: Car },
       { id: 'admin-report', label: 'Attendance Records', icon: Calendar },
       { id: 'workorders', label: 'View Work Orders', icon: Briefcase },
       { id: 'update-wo-status', label: 'Update workorder status', icon: RefreshCw },
+      { id: 'vehicle-models', label: 'Vehicle Model & Variant', icon: Car },
       { id: 'profile', label: 'Profile', icon: User }
     ];
   };

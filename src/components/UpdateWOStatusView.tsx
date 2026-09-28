@@ -38,10 +38,14 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
     search: '',
     jobcard_type: '',
     job_status: '',
-    center_code: '',
-    start_date: new Date(Date.now() - 31 * 86400000).toISOString().split('T')[0],
-    end_date: new Date().toISOString().split('T')[0]
+    center_code: ''
   });
+
+  // Date Filter based on Jobcard Date (Single date or Date range)
+  const [dateMode, setDateMode] = useState<'all' | 'single' | 'range'>('all');
+  const [singleDate, setSingleDate] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const [centers, setCenters] = useState<any[]>([]);
   const [manufacturers, setManufacturers] = useState<string[]>([]);
@@ -80,9 +84,16 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
       if (filters.jobcard_type) params.append('jobcard_type', filters.jobcard_type);
       if (filters.job_status) params.append('job_status', filters.job_status);
       if (filters.center_code) params.append('center_code', filters.center_code);
-      if (filters.start_date) params.append('start_date', filters.start_date);
-      if (filters.end_date) params.append('end_date', filters.end_date);
-      params.append('limit', '300');
+
+      // Date filter strictly based on Jobcard Date
+      if (dateMode === 'single' && singleDate) {
+        params.append('start_date', singleDate);
+        params.append('end_date', singleDate);
+      } else if (dateMode === 'range') {
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+      }
+      params.append('limit', '500');
 
       const res = await authFetch(`/api/workorders?${params.toString()}`);
       if (res.ok) {
@@ -142,9 +153,9 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
       loadOrders();
     }, 250);
     return () => clearTimeout(timer);
-  }, [filters.search, filters.jobcard_type, filters.job_status, filters.center_code, filters.start_date, filters.end_date]);
+  }, [filters.search, filters.jobcard_type, filters.job_status, filters.center_code, dateMode, singleDate, startDate, endDate]);
 
-  // Client-side real-time filter
+  // Client-side real-time filter (including Jobcard Date filtering)
   const filteredOrders = useMemo(() => {
     let list = [...orders];
 
@@ -182,8 +193,29 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
       list = list.filter((o) => o.job_status === filters.job_status);
     }
 
+    // Filter strictly based on jobcard_date
+    if (dateMode === 'single' && singleDate) {
+      list = list.filter((o) => {
+        const d = (o.jobcard_date ? o.jobcard_date.split('T')[0] : '');
+        return d === singleDate;
+      });
+    } else if (dateMode === 'range') {
+      if (startDate) {
+        list = list.filter((o) => {
+          const d = (o.jobcard_date ? o.jobcard_date.split('T')[0] : '');
+          return d >= startDate;
+        });
+      }
+      if (endDate) {
+        list = list.filter((o) => {
+          const d = (o.jobcard_date ? o.jobcard_date.split('T')[0] : '');
+          return d <= endDate;
+        });
+      }
+    }
+
     return list;
-  }, [orders, filters.search, filters.jobcard_type, filters.center_code, filters.job_status]);
+  }, [orders, filters.search, filters.jobcard_type, filters.center_code, filters.job_status, dateMode, singleDate, startDate, endDate]);
 
   const selectedOrder = orders.find((o) => String(o.id) === String(selectedOrderId));
 
@@ -461,16 +493,81 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
           </select>
         </div>
 
-        {/* Date */}
+        {/* Date Filter Mode Selector */}
         <div>
-          <input
-            type="date"
-            value={filters.start_date}
-            onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
-            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 font-mono focus:outline-none focus:border-sky-500"
-          />
+          <select
+            value={dateMode}
+            onChange={(e) => {
+              const mode = e.target.value as 'all' | 'single' | 'range';
+              setDateMode(mode);
+              if (mode === 'single' && !singleDate) {
+                setSingleDate(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
+              }
+            }}
+            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 font-medium focus:outline-none focus:border-sky-500"
+          >
+            <option value="all">📅 Date Filter: Off (All Dates)</option>
+            <option value="single">📅 Single Jobcard Date</option>
+            <option value="range">📅 Date Range (Jobcard)</option>
+          </select>
         </div>
       </div>
+
+      {/* Date Filter Inputs (shown when Single or Range is active) */}
+      {dateMode !== 'all' && (
+        <div className="flex flex-wrap items-center gap-3 p-3 bg-sky-50/60 border border-sky-200 rounded-xl text-xs">
+          <span className="font-bold text-sky-900 flex items-center gap-1.5 shrink-0">
+            <Calendar className="w-3.5 h-3.5 text-sky-600" />
+            Jobcard Date Filter:
+          </span>
+
+          {dateMode === 'single' ? (
+            <div className="flex items-center gap-2">
+              <label className="text-slate-600 font-semibold text-[11px]">Date:</label>
+              <input
+                type="date"
+                value={singleDate}
+                onChange={(e) => setSingleDate(e.target.value)}
+                className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono text-xs focus:outline-none focus:border-sky-500"
+              />
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-slate-600 font-semibold text-[11px]">From:</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono text-xs focus:outline-none focus:border-sky-500"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-slate-600 font-semibold text-[11px]">To:</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono text-xs focus:outline-none focus:border-sky-500"
+                />
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setDateMode('all');
+              setSingleDate('');
+              setStartDate('');
+              setEndDate('');
+            }}
+            className="ml-auto px-2.5 py-1 text-slate-500 hover:text-slate-800 hover:bg-slate-200 rounded-md text-[11px] font-semibold transition cursor-pointer"
+          >
+            Clear Date Filter
+          </button>
+        </div>
+      )}
 
       {/* Selectable Active Work Orders Table/Cards */}
       <div className="space-y-3">
@@ -484,6 +581,7 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
             <thead className="sticky top-0 bg-slate-100 z-10">
               <tr className="border-b border-slate-200 text-slate-700 font-bold uppercase tracking-wider text-[11px]">
                 <th className="p-2.5 whitespace-nowrap">Jobcard No</th>
+                <th className="p-2.5 whitespace-nowrap">Jobcard Date</th>
                 <th className="p-2.5 whitespace-nowrap">Type</th>
                 <th className="p-2.5 whitespace-nowrap">Reg No</th>
                 <th className="p-2.5 whitespace-nowrap">Technician</th>
@@ -495,7 +593,7 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400 italic">
+                  <td colSpan={8} className="p-8 text-center text-slate-400 italic">
                     No active work orders found matching your criteria.
                   </td>
                 </tr>
@@ -512,6 +610,9 @@ export const UpdateWOStatusView: React.FC<UpdateWOStatusViewProps> = ({
                     >
                       <td className="p-2.5 font-mono font-bold text-sky-700 whitespace-nowrap">
                         #{o.jobcard_no}
+                      </td>
+                      <td className="p-2.5 font-mono text-[11px] text-slate-600 whitespace-nowrap">
+                        {o.jobcard_date || '—'}
                       </td>
                       <td className="p-2.5 whitespace-nowrap">{o.jobcard_type}</td>
                       <td className="p-2.5 font-mono whitespace-nowrap">{o.vehicle_registration_no || '—'}</td>

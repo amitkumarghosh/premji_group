@@ -30,7 +30,6 @@ export const VehicleModelsView: React.FC<VehicleModelsViewProps> = ({
   // Add Form State
   const [newManufacturer, setNewManufacturer] = useState('');
   const [newModel, setNewModel] = useState('');
-  const [newVariant, setNewVariant] = useState('');
 
   // Edit Modal State
   const [editingItem, setEditingItem] = useState<VehicleModelItem | null>(null);
@@ -123,7 +122,6 @@ export const VehicleModelsView: React.FC<VehicleModelsViewProps> = ({
     e.preventDefault();
     const cleanMfr = newManufacturer.trim();
     const cleanMod = newModel.trim();
-    const cleanVar = newVariant.trim();
 
     if (!cleanMfr || !cleanMod) {
       onNotification('Please enter both Vehicle Manufacturer and Vehicle Model', 'error');
@@ -142,8 +140,7 @@ export const VehicleModelsView: React.FC<VehicleModelsViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           Vehicle_Manufacturer: cleanMfr,
-          Vehicle_Model: cleanMod,
-          Vehicle_Variant: cleanVar || null
+          Vehicle_Model: cleanMod
         })
       });
 
@@ -151,7 +148,6 @@ export const VehicleModelsView: React.FC<VehicleModelsViewProps> = ({
       if (res.ok && data.success) {
         onNotification(`Vehicle Model "${cleanMfr} ${cleanMod}" added successfully!`, 'success');
         setNewModel('');
-        setNewVariant('');
         loadVehicleModels();
         onRefreshLookups?.();
       } else {
@@ -280,11 +276,7 @@ export const VehicleModelsView: React.FC<VehicleModelsViewProps> = ({
               Update Vehicle Model & Variant
             </h1>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Manage manufacturers, models, and specifications in the{' '}
-              <code className="font-mono text-sky-700 font-bold bg-sky-50 px-1 py-0.5 rounded">
-                vehicle_model
-              </code>{' '}
-              database. Duplicate combinations are strictly prevented.
+              Manage vehicle manufacturers and models in the database. Duplicate combinations are strictly prevented.
             </p>
           </div>
         </div>
@@ -363,19 +355,6 @@ export const VehicleModelsView: React.FC<VehicleModelsViewProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1 uppercase tracking-wider text-[10px]">
-                  Variant / Trim (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. V, VX, ZX, AT"
-                  value={newVariant}
-                  onChange={(e) => setNewVariant(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                />
-              </div>
-
               {/* Duplicate Warning Warning Box */}
               {isAddDuplicate && (
                 <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-800 text-[11px] flex items-start gap-2">
@@ -402,7 +381,7 @@ export const VehicleModelsView: React.FC<VehicleModelsViewProps> = ({
                 ) : (
                   <>
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add to vehicle_model</span>
+                    <span>Add Vehicle Model</span>
                   </>
                 )}
               </button>
@@ -629,8 +608,7 @@ export const VehicleModelsView: React.FC<VehicleModelsViewProps> = ({
               Are you sure you want to delete{' '}
               <span className="font-bold text-slate-900">
                 {deleteCandidate.Vehicle_Manufacturer} {deleteCandidate.Vehicle_Model}
-              </span>{' '}
-              from the <code className="font-mono text-rose-600">vehicle_model</code> table?
+              </span> ?
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">

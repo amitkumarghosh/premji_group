@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Briefcase, Search, Download, Eye, Calendar, Filter, RefreshCw, ZoomIn, X } from 'lucide-react';
+import { Briefcase, Search, Download, Eye, Calendar, Filter, RefreshCw, ZoomIn, X, CheckSquare, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { formatPhotoUrl, FALLBACK_IMAGE_SVG } from '../utils/photoUtils';
 import { authFetch } from '../utils/api';
 
@@ -20,6 +21,7 @@ export const WorkOrdersView: React.FC<WorkOrdersViewProps> = ({
   const [orders, setOrders] = useState<any[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number | string>>(new Set());
 
   // Default date range: From (-31 days) to To (today)
   const [filters, setFilters] = useState({
@@ -117,66 +119,193 @@ export const WorkOrdersView: React.FC<WorkOrdersViewProps> = ({
     loadOrders();
   };
 
-  // Excel (.xlsx / .csv) Export per specification (excluding raw image blobs and delete_flag)
-  const handleExportExcel = () => {
-    if (filteredOrders.length === 0) {
+  const handleToggleSelect = (id: number | string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedIds.size === filteredOrders.length && filteredOrders.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      const next = new Set<number | string>();
+      filteredOrders.forEach((o) => {
+        if (o.id) next.add(o.id);
+        else if (o.jobcard_no) next.add(o.jobcard_no);
+      });
+      setSelectedIds(next);
+    }
+  };
+
+  // Helper to extract full dataset excluding admin_id and delete_flag with meaningful headers
+  const getExportDataset = () => {
+    const targetOrders = selectedIds.size > 0
+      ? filteredOrders.filter((o) => selectedIds.has(o.id) || selectedIds.has(o.jobcard_no))
+      : filteredOrders;
+
+    if (targetOrders.length === 0) {
       onNotification('No work orders available to export', 'error');
-      return;
+      return null;
     }
 
     const headers = [
+      'Work Order ID',
       'Jobcard No',
       'Jobcard Type',
-      'Technician Code',
-      'Name of Technician',
-      'Previous Jobcard No',
+      'Jobcard Date',
+      'Job Assign Date',
+      'Job Status',
+      'Vehicle Registration No',
       'Vehicle Manufacturer',
       'Vehicle Model',
       'Vehicle Variant',
-      'Registration No',
-      'Kilometres',
-      'Service Advisor',
-      'Job Status',
-      'Jobcard Date',
-      'Job Assign Date',
-      'Job Complete Date',
-      'Center Code',
-      'Center Name',
-      'TL Remarks',
-      'Admin Remarks'
+      'Kilometres Run',
+      'Technician Code',
+      'Technician Name',
+      'Service Advisor Name',
+      'Workshop Center Code',
+      'Workshop Center Name',
+      'Center Location',
+      'Previous Jobcard No',
+      'Job Start Time',
+      'Job Completion Date',
+      'Job Completion Time',
+      'Team Leader ID',
+      'Team Leader Remarks',
+      'TL Last Update Time',
+      'Admin Remarks',
+      'Admin Last Update Time',
+      'Jobcard Photo Reference',
+      'Wheel Alignment',
+      'Wheel Balancing',
+      'Tyre Fitting',
+      'Puncture Removed',
+      'TPMS Replacement',
+      'Disc Cutting',
+      'Drum Cutting',
+      'Brake Testing',
+      'Carbon Cleaning / Decarb',
+      'Washing & Cleaning',
+      'Interior Cleaning',
+      'Exterior Polishing',
+      'Paint Protection Film (PPF)',
+      'Wheel / Tyre Rotation',
+      'Record Created At',
+      'Record Updated At'
     ];
 
-    const rows = filteredOrders.map((o) => [
-      `"${o.jobcard_no || ''}"`,
-      `"${o.jobcard_type || ''}"`,
-      `"${o.technician_code || ''}"`,
-      `"${o.name_of_technician || ''}"`,
-      `"${o.previous_jobcard_no || ''}"`,
-      `"${o.vehicle_manufacturer || ''}"`,
-      `"${o.vehicle_model || ''}"`,
-      `"${o.vehicle_variant || ''}"`,
-      `"${o.vehicle_registration_no || ''}"`,
-      `"${o.kilometres || ''}"`,
-      `"${o.name_of_service_advisor || ''}"`,
-      `"${o.job_status || ''}"`,
-      `"${o.jobcard_date || ''}"`,
-      `"${o.job_assign_date || ''}"`,
-      `"${o.job_compleate_date || ''}"`,
-      `"${o.center_code || ''}"`,
-      `"${o.center_name || ''}"`,
-      `"${(o.tl_remarks || '').replace(/"/g, '""')}"`,
-      `"${(o.admin_remarks || '').replace(/"/g, '""')}"`
+    const rows = targetOrders.map((o) => [
+      o.id || '',
+      o.jobcard_no || '',
+      o.jobcard_type || '',
+      o.jobcard_date || '',
+      o.job_assign_date || '',
+      o.job_status || '',
+      o.vehicle_registration_no || '',
+      o.vehicle_manufacturer || '',
+      o.vehicle_model || '',
+      o.vehicle_variant || '',
+      o.kilometres !== null && o.kilometres !== undefined ? o.kilometres : '',
+      o.technician_code || '',
+      o.name_of_technician || '',
+      o.name_of_service_advisor || '',
+      o.center_code || '',
+      o.center_name || '',
+      o.center_location || '',
+      o.previous_jobcard_no || '',
+      o.job_start_time || '',
+      o.job_compleate_date || '',
+      o.job_compleate_time || '',
+      o.tl_id || '',
+      o.tl_remarks || '',
+      o.tl_last_update || '',
+      o.admin_remarks || '',
+      o.admin_last_update_time || '',
+      o.jobcard_photo || '',
+      o.wheel_alignment ?? 0,
+      o.wheel_balancing ?? 0,
+      o.tyre_fitting ?? 0,
+      o.puncture_removed ?? 0,
+      o.tpms_replacement ?? 0,
+      o.disc_cutting ?? 0,
+      o.drum_cutting ?? 0,
+      o.brake_testing ?? 0,
+      o.carbon_cleaning_decarb ?? 0,
+      o.washing_and_cleaning ?? 0,
+      o.interior_cleaning ?? 0,
+      o.exterior_polishing ?? 0,
+      o.paint_protection_film ?? 0,
+      o.wheel_tyre_rotation ?? 0,
+      o.created_at || '',
+      o.updated_at || ''
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Premji_WorkOrders_${filters.start_date}_to_${filters.end_date}.xlsx`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    onNotification('Work Orders report exported successfully!', 'success');
+    return { headers, rows, count: targetOrders.length };
+  };
+
+  // 1. Export as Excel Binary (.xlsb)
+  const handleExportXLSB = () => {
+    const data = getExportDataset();
+    if (!data) return;
+
+    try {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([data.headers, ...data.rows]);
+      XLSX.utils.book_append_sheet(wb, ws, 'Work Orders');
+
+      const xlsbArray = XLSX.write(wb, { bookType: 'xlsb', type: 'array' });
+      const blob = new Blob([xlsbArray], {
+        type: 'application/vnd.ms-excel.sheet.binary.macroEnabled.12'
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Premji_WorkOrders_${new Date().toISOString().split('T')[0]}.xlsb`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      onNotification(`Successfully exported ${data.count} work orders as .xlsb binary!`, 'success');
+    } catch (e: any) {
+      console.error(e);
+      onNotification('Failed to generate .xlsb spreadsheet file', 'error');
+    }
+  };
+
+  // 2. Export as CSV (.csv)
+  const handleExportCSV = () => {
+    const data = getExportDataset();
+    if (!data) return;
+
+    try {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([data.headers, ...data.rows]);
+      const csvString = XLSX.utils.sheet_to_csv(ws);
+      const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Premji_WorkOrders_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      onNotification(`Successfully exported ${data.count} work orders as .csv!`, 'success');
+    } catch (e: any) {
+      console.error(e);
+      onNotification('Failed to generate CSV file', 'error');
+    }
   };
 
   return (
@@ -192,13 +321,41 @@ export const WorkOrdersView: React.FC<WorkOrdersViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleExportExcel}
-          className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer self-start md:self-auto"
-        >
-          <Download className="w-4 h-4" />
-          📥 Download Excel (.xlsx)
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition"
+            >
+              Clear Selected ({selectedIds.size})
+            </button>
+          )}
+
+          {/* Download as .xlsb */}
+          <button
+            onClick={handleExportXLSB}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
+            title="Download in Excel Binary (.xlsb) format"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>
+              {selectedIds.size > 0 ? `Export Selected (${selectedIds.size}) .xlsb` : `Export All (${filteredOrders.length}) .xlsb`}
+            </span>
+          </button>
+
+          {/* Download as .CSV */}
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
+            title="Download in Universal CSV (.csv) format"
+          >
+            <Download className="w-4 h-4" />
+            <span>
+              {selectedIds.size > 0 ? `Export Selected (${selectedIds.size}) .CSV` : `Export All (${filteredOrders.length}) .CSV`}
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* Filter Matrix */}
@@ -296,29 +453,39 @@ export const WorkOrdersView: React.FC<WorkOrdersViewProps> = ({
         <table className="w-full text-left text-xs border-collapse">
           <thead>
             <tr className="bg-slate-100/90 border-b border-slate-200 text-slate-700 font-bold uppercase tracking-wider text-[11px]">
+              <th className="p-3 w-10 text-center">
+                <input
+                  type="checkbox"
+                  checked={filteredOrders.length > 0 && selectedIds.size === filteredOrders.length}
+                  onChange={handleToggleSelectAll}
+                  className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  title="Select All / Deselect All Filtered"
+                />
+              </th>
               <th className="p-3 whitespace-nowrap">Jobcard No</th>
+              <th className="p-3 whitespace-nowrap">Jobcard Date</th>
               <th className="p-3 whitespace-nowrap">Jobcard Type</th>
+              <th className="p-3 whitespace-nowrap">Reg No</th>
               <th className="p-3 whitespace-nowrap">Tech Code</th>
               <th className="p-3 whitespace-nowrap">Name of Technician</th>
               <th className="p-3 text-center whitespace-nowrap">Jobcard Photo</th>
               <th className="p-3 whitespace-nowrap">Previous Jobcard No</th>
               <th className="p-3 whitespace-nowrap">Job Status</th>
               <th className="p-3 whitespace-nowrap">Job Assign Date</th>
-              <th className="p-3 whitespace-nowrap">Job Complete Date</th>
               <th className="p-3 whitespace-nowrap">Center Code</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
             {loading && orders.length === 0 ? (
               <tr>
-                <td colSpan={10} className="p-12 text-center">
+                <td colSpan={12} className="p-12 text-center">
                   <RefreshCw className="w-6 h-6 animate-spin text-sky-600 mx-auto" />
                   <p className="text-xs text-slate-400 mt-2">Loading work orders...</p>
                 </td>
               </tr>
             ) : filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={10} className="p-12 text-center text-slate-400 italic">
+                <td colSpan={12} className="p-12 text-center text-slate-400 italic">
                   No work orders found for the selected criteria.
                 </td>
               </tr>
@@ -328,17 +495,42 @@ export const WorkOrdersView: React.FC<WorkOrdersViewProps> = ({
                 const isClosed = o.job_status === 'Closed';
                 const isReassigned = o.job_status === 'Re-assigned' || o.job_status === 'Re-Assigned';
                 const isInProgress = o.job_status === 'In Progress' || !o.job_status;
+                const orderKey = o.id || o.jobcard_no;
+                const isSelected = selectedIds.has(orderKey);
 
                 return (
-                  <tr key={o.id || `${o.jobcard_no}_${o.id}`} className="hover:bg-slate-50/80 transition">
+                  <tr
+                    key={o.id || `${o.jobcard_no}_${o.id}`}
+                    className={`hover:bg-slate-50/80 transition ${isSelected ? 'bg-sky-50/80' : ''}`}
+                  >
+                    {/* Checkbox */}
+                    <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleSelect(orderKey)}
+                        className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                      />
+                    </td>
+
                     {/* 1. Jobcard No */}
                     <td className="p-3 font-mono font-bold text-sky-700 whitespace-nowrap">
-                      {o.jobcard_no || '—'}
+                      #{o.jobcard_no || '—'}
+                    </td>
+
+                    {/* Jobcard Date */}
+                    <td className="p-3 font-mono text-[11px] text-slate-600 whitespace-nowrap">
+                      {o.jobcard_date || '—'}
                     </td>
 
                     {/* 2. Jobcard Type */}
                     <td className="p-3 font-semibold text-slate-800 whitespace-nowrap">
                       {o.jobcard_type || 'New workorder'}
+                    </td>
+
+                    {/* Reg No */}
+                    <td className="p-3 font-mono text-slate-700 font-semibold whitespace-nowrap">
+                      {o.vehicle_registration_no || '—'}
                     </td>
 
                     {/* 3. Technician Code */}

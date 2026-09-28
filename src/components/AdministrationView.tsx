@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Users, Building, Plus, Search, Download, CheckCircle, RefreshCw, Edit, ShieldAlert, Eye, EyeOff, Car, Calendar, FileText } from 'lucide-react';
+import { Settings, Users, Building, Plus, Search, Download, CheckCircle, RefreshCw, Edit, ShieldAlert, Eye, EyeOff, Calendar, FileText } from 'lucide-react';
 import { authFetch } from '../utils/api';
-import { VehicleModelsView } from './VehicleModelsView';
 
 interface AdministrationViewProps {
   user: any;
   centers: any[];
-  initialTab?: 'users' | 'centers' | 'vehicles';
+  initialTab?: 'users' | 'centers';
   onNotification: (message: string, type: 'success' | 'error' | 'info') => void;
   onRefreshCenters: () => void;
 }
@@ -19,7 +18,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   onRefreshCenters
 }) => {
   const isSuperAdmin = user.user_role === 'Super Admin';
-  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'centers' | 'vehicles'>(initialTab);
+  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'centers'>(initialTab);
   const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -302,15 +301,6 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           >
             <Building className="w-4 h-4" />
             Manage Centers
-          </button>
-          <button
-            onClick={() => setActiveAdminTab('vehicles')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeAdminTab === 'vehicles' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Car className="w-4 h-4 text-sky-600" />
-            Vehicle Model & Variant
           </button>
         </div>
       </div>
@@ -868,14 +858,6 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
             </table>
           </div>
         </div>
-      )}
-
-      {/* ================= TAB 3: VEHICLE MODEL & VARIANT ================= */}
-      {activeAdminTab === 'vehicles' && (
-        <VehicleModelsView
-          onNotification={onNotification}
-          onRefreshLookups={onRefreshCenters}
-        />
       )}
     </div>
   );
