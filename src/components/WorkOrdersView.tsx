@@ -3,6 +3,7 @@ import { Briefcase, Search, Download, Eye, Calendar, Filter, RefreshCw, ZoomIn, 
 import * as XLSX from 'xlsx';
 import { formatPhotoUrl, FALLBACK_IMAGE_SVG } from '../utils/photoUtils';
 import { authFetch } from '../utils/api';
+import { getIstDateString } from '../lib/ist-time';
 
 interface WorkOrdersViewProps {
   user: any;
@@ -23,14 +24,15 @@ export const WorkOrdersView: React.FC<WorkOrdersViewProps> = ({
   const [loading, setLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number | string>>(new Set());
 
-  // Default date range: From (-31 days) to To (today)
+  // Default date range: strictly present / today date
+  const todayIST = getIstDateString();
   const [filters, setFilters] = useState({
     search: '',
     jobcard_type: '',
     job_status: '',
     center_code: isTeamLeader ? (user.center_code || '') : '',
-    start_date: new Date(Date.now() - 31 * 86400000).toISOString().split('T')[0],
-    end_date: new Date().toISOString().split('T')[0]
+    start_date: todayIST,
+    end_date: todayIST
   });
 
   const loadOrders = async () => {

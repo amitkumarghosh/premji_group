@@ -1,22 +1,17 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Clock,
   Coffee,
   CheckCircle,
-  Eye,
-  Maximize2,
-  RotateCw,
-  X,
   Award,
   Sparkles,
-  ShieldCheck,
-  Building
+  Calendar,
+  Check,
+  Hourglass
 } from 'lucide-react';
 import {
-  formatIstTimeDisplay,
-  formatIstFullDisplay
+  formatIstTimeDisplay
 } from '../../lib/ist-time.ts';
-import { formatPhotoUrl, FALLBACK_IMAGE_SVG } from '../../utils/photoUtils.ts';
 
 interface DailyAttendanceSummaryProps {
   attendance: any | null;
@@ -31,12 +26,8 @@ interface DailyAttendanceSummaryProps {
 
 export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
   attendance,
-  employee,
-  onInspectImage
+  employee
 }) => {
-  const [internalInspect, setInternalInspect] = useState<{ url: string; title: string; time?: string } | null>(null);
-  const [inspectRotation, setInspectRotation] = useState(0);
-
   if (!attendance) {
     return (
       <div className="rounded-3xl border border-sky-100 bg-white/70 p-8 text-center backdrop-blur-xl shadow-md">
@@ -45,22 +36,11 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
         </div>
         <h4 className="text-base font-bold text-slate-800">No Attendance Recorded for Today Yet</h4>
         <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
-          Please position your face within the red oval guide above and click &quot;Mark On Duty In&quot; to begin your shift.
+          Please position your face within the camera guide above and click &quot;Mark On Duty In&quot; to begin your shift.
         </p>
       </div>
     );
   }
-
-  const handlePhotoClick = (url: string | null | undefined, title: string, time?: string) => {
-    if (!url) return;
-    const resolvedUrl = formatPhotoUrl(url);
-    if (onInspectImage) {
-      onInspectImage({ url: resolvedUrl, title: `${title} - ${time || ''}` });
-    } else {
-      setInspectRotation(0);
-      setInternalInspect({ url: resolvedUrl, title, time });
-    }
-  };
 
   const workingHrs = Number(attendance.total_working_hrs ?? 0).toFixed(2);
   const breakHrs = Number(attendance.total_break_hrs ?? 0).toFixed(2);
@@ -72,36 +52,44 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
       title: 'Morning Shift In',
       subtitle: 'On Duty In',
       time: attendance.on_duty_in_time,
-      image: attendance.on_duty_in_image,
       icon: '☀️',
-      color: 'border-emerald-200 bg-emerald-50/50 text-emerald-800'
+      borderColor: 'border-emerald-200',
+      bgColor: 'bg-emerald-50/70',
+      textColor: 'text-emerald-700',
+      badgeBg: 'bg-emerald-100 text-emerald-800'
     },
     {
       key: 'intermidiate_off_out',
       title: 'Break Departure',
       subtitle: 'Break Out',
       time: attendance.intermidiate_off_out_time,
-      image: attendance.intermidiate_off_out_image,
       icon: '☕',
-      color: 'border-amber-200 bg-amber-50/50 text-amber-800'
+      borderColor: 'border-amber-200',
+      bgColor: 'bg-amber-50/70',
+      textColor: 'text-amber-700',
+      badgeBg: 'bg-amber-100 text-amber-800'
     },
     {
       key: 'intermidiate_off_in',
       title: 'Break Return',
       subtitle: 'Break In',
       time: attendance.intermidiate_off_in_time,
-      image: attendance.intermidiate_off_in_image,
       icon: '💼',
-      color: 'border-blue-200 bg-blue-50/50 text-blue-800'
+      borderColor: 'border-blue-200',
+      bgColor: 'bg-blue-50/70',
+      textColor: 'text-blue-700',
+      badgeBg: 'bg-blue-100 text-blue-800'
     },
     {
       key: 'on_duty_out',
       title: 'Shift Check-Out',
       subtitle: 'On Duty Out',
       time: attendance.on_duty_out_time,
-      image: attendance.on_duty_out_image,
       icon: '🏁',
-      color: 'border-purple-200 bg-purple-50/50 text-purple-800'
+      borderColor: 'border-purple-200',
+      bgColor: 'bg-purple-50/70',
+      textColor: 'text-purple-700',
+      badgeBg: 'bg-purple-100 text-purple-800'
     }
   ];
 
@@ -167,15 +155,15 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
         </div>
       </div>
 
-      {/* 4 Photo Checkpoint Thumbnails Grid with Click to Enlarge */}
+      {/* 4 Checkpoint Status & Timestamps Grid (Time-Only Display, No Images) */}
       <div className="rounded-3xl border border-sky-100/90 bg-white/80 p-6 md:p-8 shadow-xl backdrop-blur-2xl">
         <div className="mb-5 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
           <div>
             <h3 className="text-base font-black tracking-tight text-slate-900">
-              Shift Verification Gallery
+              Today&apos;s Checkpoint Timestamps
             </h3>
             <p className="text-xs text-slate-500">
-              High-resolution face capture logs for each daily checkpoint. Click any photo to zoom.
+              Verified IST timestamps for each shift checkpoint.
             </p>
           </div>
           {attendance.attendance_date && (
@@ -185,156 +173,49 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {checkpoints.map((cp) => {
-            const hasPhoto = !!cp.image;
-            const photoUrl = hasPhoto ? formatPhotoUrl(cp.image) : FALLBACK_IMAGE_SVG;
+            const isRecorded = !!cp.time;
             const timeDisplay = formatIstTimeDisplay(cp.time);
 
             return (
               <div
                 key={cp.key}
-                onClick={() => hasPhoto && handlePhotoClick(cp.image, cp.title, timeDisplay)}
-                className={`group relative flex flex-col overflow-hidden rounded-2xl border transition-all ${
-                  hasPhoto
-                    ? 'cursor-pointer hover:border-sky-400 hover:shadow-lg hover:-translate-y-0.5'
+                className={`relative p-5 rounded-2xl border transition-all ${
+                  isRecorded
+                    ? `${cp.borderColor} ${cp.bgColor} shadow-sm`
                     : 'border-slate-200 bg-slate-50/60 opacity-60'
                 }`}
               >
-                {/* Image Container with Clean Oval Mask (No oval border, outside area not visible) */}
-                <div className="relative aspect-[3/4] w-full p-2 bg-slate-50 flex items-center justify-center">
-                  <div
-                    className="relative w-full h-full overflow-hidden shadow-inner bg-slate-100"
-                    style={{ clipPath: 'ellipse(42% 48% at 50% 50%)' }}
-                  >
-                    <img
-                      src={photoUrl}
-                      alt={cp.title}
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                      loading="lazy"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = FALLBACK_IMAGE_SVG;
-                      }}
-                    />
-
-                    {/* Zoom Overlay Icon */}
-                    {hasPhoto && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 backdrop-blur-xs transition duration-200 group-hover:opacity-100">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-900 shadow-md">
-                          <Maximize2 className="h-3.5 w-3.5" />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Status Badge */}
-                  <div className="absolute top-3 left-3 flex items-center gap-1 rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-md shadow-xs">
-                    <span>{cp.icon}</span>
-                    <span>{cp.subtitle}</span>
-                  </div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-2xl">{cp.icon}</span>
+                  {isRecorded ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      <Check className="h-3 w-3" />
+                      <span>Recorded</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500">
+                      <Hourglass className="h-3 w-3" />
+                      <span>Pending</span>
+                    </span>
+                  )}
                 </div>
 
-                {/* Card Info Footer */}
-                <div className="p-3 bg-white border-t border-slate-100">
-                  <div className="text-[11px] font-bold text-slate-800 truncate">{cp.title}</div>
-                  <div className="mt-1 flex items-center justify-between">
-                    <span className="font-mono text-xs font-extrabold text-sky-700">{timeDisplay}</span>
-                    {hasPhoto ? (
-                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-                        <CheckCircle className="h-3 w-3" />
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-slate-400 italic">Pending</span>
-                    )}
-                  </div>
+                <div className="text-xs font-bold text-slate-800">{cp.title}</div>
+                <div className="text-[10px] text-slate-500 font-medium">{cp.subtitle}</div>
+
+                <div className="mt-3 pt-3 border-t border-slate-200/60 flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">IST Time</span>
+                  <span className={`font-mono text-sm font-black ${isRecorded ? cp.textColor : 'text-slate-400'}`}>
+                    {timeDisplay}
+                  </span>
                 </div>
               </div>
             );
           })}
         </div>
-
-        {/* Audit & Ground Truth Summary Ribbon */}
-        <div className="mt-6 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 text-xs text-slate-600 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-sky-600 shrink-0" />
-            <div>
-              <span className="font-bold text-slate-700">Initial Check-In:</span>{' '}
-              <span className="font-mono font-semibold text-slate-900">
-                {attendance.all_innitial_time ? formatIstFullDisplay(attendance.all_innitial_time) : formatIstTimeDisplay(attendance.on_duty_in_time)}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Building className="h-4 w-4 text-indigo-600 shrink-0" />
-            <div>
-              <span className="font-bold text-slate-700">Center:</span>{' '}
-              <span className="font-semibold text-slate-900">
-                {attendance.center_name || employee?.center_name || 'Premji Operations Hub'}
-              </span>
-              {(attendance.center_location || employee?.center_location) && (
-                <span className="text-slate-400"> ({attendance.center_location || employee?.center_location})</span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-amber-600 shrink-0" />
-            <div>
-              <span className="font-bold text-slate-700">Last Audit:</span>{' '}
-              <span className="font-mono text-slate-800">
-                {attendance.last_edit_timestamp ? formatIstFullDisplay(attendance.last_edit_timestamp) : 'Original Punch'}
-              </span>
-              {attendance.last_edited_by && (
-                <span className="text-slate-400 font-mono"> · {attendance.last_edited_by}</span>
-              )}
-            </div>
-          </div>
-        </div>
       </div>
-
-      {/* Internal High-Resolution Modal if onInspectImage not provided */}
-      {internalInspect && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
-          <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 p-4 text-white">
-              <div>
-                <h4 className="text-sm font-bold">{internalInspect.title}</h4>
-                {internalInspect.time && (
-                  <p className="text-[11px] text-slate-400 font-mono">IST Timestamp: {internalInspect.time}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setInspectRotation((r) => (r + 90) % 360)}
-                  className="rounded-xl p-2 text-slate-400 hover:bg-slate-800 hover:text-white transition cursor-pointer"
-                  title="Rotate Image 90°"
-                >
-                  <RotateCw className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setInternalInspect(null)}
-                  className="rounded-xl p-2 text-slate-400 hover:bg-slate-800 hover:text-white transition cursor-pointer"
-                  title="Close Inspector"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex min-h-[360px] items-center justify-center p-6 bg-black">
-              <img
-                src={internalInspect.url}
-                alt={internalInspect.title}
-                style={{ transform: `rotate(${inspectRotation}deg)` }}
-                className="max-h-[70vh] max-w-full rounded-xl object-contain transition-transform duration-200"
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
