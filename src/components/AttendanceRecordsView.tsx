@@ -78,6 +78,9 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     search: ''
   });
 
+  // Selected quick preset (defaults to 'today')
+  const [selectedPreset, setSelectedPreset] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today');
+
   // ==================== TAB 2: ADD ATTENDANCE (MULTI-SELECT) STATE ====================
   const [addForm, setAddForm] = useState({
     attendance_date: today,
@@ -204,6 +207,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
   };
 
   const handleQuickPreset = (preset: 'today' | 'yesterday' | 'week' | 'month') => {
+    setSelectedPreset(preset);
     const todayStr = getIstDateString();
     if (preset === 'today') {
       setFilters(prev => ({ ...prev, start_date: todayStr, end_date: todayStr }));
@@ -692,32 +696,48 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
 
                 {/* Quick Presets */}
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="text-[11px] text-slate-400 mr-1">Presets:</span>
+                  <span className="text-[11px] text-slate-400 mr-1 font-semibold">Presets:</span>
                   <button
                     type="button"
                     onClick={() => handleQuickPreset('today')}
-                    className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-600 hover:bg-sky-50 hover:text-sky-700 transition cursor-pointer font-medium"
+                    className={`rounded-xl px-3 py-1.5 transition cursor-pointer font-bold ${
+                      selectedPreset === 'today'
+                        ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30 ring-1 ring-sky-500'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 font-medium'
+                    }`}
                   >
                     Today
                   </button>
                   <button
                     type="button"
                     onClick={() => handleQuickPreset('yesterday')}
-                    className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-600 hover:bg-sky-50 hover:text-sky-700 transition cursor-pointer font-medium"
+                    className={`rounded-xl px-3 py-1.5 transition cursor-pointer font-bold ${
+                      selectedPreset === 'yesterday'
+                        ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30 ring-1 ring-sky-500'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 font-medium'
+                    }`}
                   >
                     Yesterday
                   </button>
                   <button
                     type="button"
                     onClick={() => handleQuickPreset('week')}
-                    className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-600 hover:bg-sky-50 hover:text-sky-700 transition cursor-pointer font-medium"
+                    className={`rounded-xl px-3 py-1.5 transition cursor-pointer font-bold ${
+                      selectedPreset === 'week'
+                        ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30 ring-1 ring-sky-500'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 font-medium'
+                    }`}
                   >
                     Last 7 Days
                   </button>
                   <button
                     type="button"
                     onClick={() => handleQuickPreset('month')}
-                    className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-600 hover:bg-sky-50 hover:text-sky-700 transition cursor-pointer font-medium"
+                    className={`rounded-xl px-3 py-1.5 transition cursor-pointer font-bold ${
+                      selectedPreset === 'month'
+                        ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30 ring-1 ring-sky-500'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 font-medium'
+                    }`}
                   >
                     Last 30 Days
                   </button>
@@ -732,7 +752,10 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                   <input
                     type="date"
                     value={filters.start_date}
-                    onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
+                    onChange={(e) => {
+                      setSelectedPreset('custom');
+                      setFilters({ ...filters, start_date: e.target.value });
+                    }}
                     className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none"
                   />
                 </div>
@@ -744,7 +767,10 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                   <input
                     type="date"
                     value={filters.end_date}
-                    onChange={(e) => setFilters({ ...filters, end_date: e.target.value })}
+                    onChange={(e) => {
+                      setSelectedPreset('custom');
+                      setFilters({ ...filters, end_date: e.target.value });
+                    }}
                     className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none"
                   />
                 </div>
