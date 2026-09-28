@@ -201,10 +201,10 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
                     : 'border-slate-200 bg-slate-50/60 opacity-60'
                 }`}
               >
-                {/* Image Container with Vertical Portrait Oval Mask for Employee View */}
-                <div className="relative aspect-[3/4] w-full p-2 bg-slate-100 flex items-center justify-center">
+                {/* Image Container with Clean Oval Mask (No oval border, outside area not visible) */}
+                <div className="relative aspect-[3/4] w-full p-2 bg-slate-50 flex items-center justify-center">
                   <div
-                    className="relative w-full h-full overflow-hidden shadow-inner bg-slate-900 border-2 border-sky-300"
+                    className="relative w-full h-full overflow-hidden shadow-inner bg-slate-100"
                     style={{ clipPath: 'ellipse(42% 48% at 50% 50%)' }}
                   >
                     <img
@@ -220,8 +220,8 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
                     {/* Zoom Overlay Icon */}
                     {hasPhoto && (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 backdrop-blur-xs transition duration-200 group-hover:opacity-100">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-900 shadow-lg">
-                          <Maximize2 className="h-4 w-4" />
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-900 shadow-md">
+                          <Maximize2 className="h-3.5 w-3.5" />
                         </div>
                       </div>
                     )}

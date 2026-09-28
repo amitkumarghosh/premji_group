@@ -32,7 +32,6 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
   onInspectImage
 }) => {
   const today = getIstDateString();
-  const thirtyDaysAgo = getIstDateString(new Date(Date.now() - 30 * 86400000));
 
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -46,8 +45,9 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     total_centers: 0
   });
 
+  // Default attendance record date filter is strictly TODAY
   const [filters, setFilters] = useState({
-    start_date: thirtyDaysAgo,
+    start_date: today,
     end_date: today,
     center_code: '',
     employee_code: '',

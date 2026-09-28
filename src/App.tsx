@@ -30,6 +30,7 @@ import { UpdateWOStatusView } from './components/UpdateWOStatusView';
 import { ProfileView } from './components/ProfileView';
 import { VehicleModelsView } from './components/VehicleModelsView';
 import { authFetch } from './utils/api';
+import { downloadImageAsFormat } from './utils/imageDownload';
 
 export type ActiveTab =
   | 'attendance'
@@ -646,24 +647,33 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setInspectRotation((r) => (r + 90) % 360)}
-                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300"
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 transition"
                   title="Rotate 90deg"
                 >
                   <RotateCw className="w-4 h-4" />
                 </button>
-                <a
-                  href={inspectImage.url}
-                  download="premji_capture.webp"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300"
-                  title="Download Image"
+                <button
+                  type="button"
+                  onClick={() => downloadImageAsFormat(inspectImage.url, inspectImage.title, 'jpeg', inspectRotation)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-sky-600 rounded-lg text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1 transition cursor-pointer"
+                  title="Download in JPEG format"
                 >
-                  <Download className="w-4 h-4" />
-                </a>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>JPEG</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadImageAsFormat(inspectImage.url, inspectImage.title, 'png', inspectRotation)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-indigo-600 rounded-lg text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1 transition cursor-pointer"
+                  title="Download in PNG format"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>PNG</span>
+                </button>
                 <button
                   onClick={() => { setInspectImage(null); setInspectRotation(0); }}
-                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300"
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 transition cursor-pointer"
+                  title="Close"
                 >
                   <X className="w-4 h-4" />
                 </button>

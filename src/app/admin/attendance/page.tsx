@@ -22,12 +22,12 @@ import {
   getIstDateString
 } from '../../../lib/ist-time.ts';
 import { formatPhotoUrl, FALLBACK_IMAGE_SVG } from '../../../utils/photoUtils.ts';
+import { downloadImageAsFormat } from '../../../utils/imageDownload.ts';
 
 export default function AdminAttendancePage() {
   const today = getIstDateString();
-  const thirtyDaysAgo = getIstDateString(new Date(Date.now() - 30 * 86400000));
 
-  const [startDate, setStartDate] = useState(thirtyDaysAgo);
+  const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [centerCode, setCenterCode] = useState('');
   const [employeeCode, setEmployeeCode] = useState('');
@@ -654,6 +654,24 @@ export default function AdminAttendancePage() {
                   title="Rotate 90°"
                 >
                   <RotateCw className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadImageAsFormat(lightboxImage.url, lightboxImage.title, 'jpeg', lightboxRotation)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-sky-600 rounded-lg text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1 transition cursor-pointer"
+                  title="Download in JPEG format"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>JPEG</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadImageAsFormat(lightboxImage.url, lightboxImage.title, 'png', lightboxRotation)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-indigo-600 rounded-lg text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1 transition cursor-pointer"
+                  title="Download in PNG format"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>PNG</span>
                 </button>
                 <button
                   type="button"
