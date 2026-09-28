@@ -451,6 +451,192 @@ export async function createExpressApp() {
     }
   });
 
+  // Fetch single attendance record by date and employee code
+  app.get('/api/attendance/record-by-date-emp', requireAuth, requireRole(['Admin', 'Super Admin', 'TeamLeader']), async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const date = (req.query.date as string) || getIstDateString();
+      const empCode = req.query.employee_code as string;
+      if (!empCode) {
+        return res.status(400).json({ error: 'Employee code is required' });
+      }
+      const record = await db.getTodayAttendance(empCode, date);
+      return res.json({ success: true, record: record || null });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to fetch attendance record' });
+    }
+  });
+
+  // Manual Attendance Create (Admin / Super Admin / TeamLeader)
+  app.post(['/api/attendance/manual-create', '/api/admin/attendance/manual-create'], requireAuth, requireRole(['Admin', 'Super Admin', 'TeamLeader']), async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const {
+        attendance_date,
+        emp_code_of_thetechnician,
+        name_of_technician,
+        center_code,
+        on_duty_in_time,
+        intermidiate_off_out_time,
+        intermidiate_off_in_time,
+        on_duty_out_time,
+        admin_remarks
+      } = req.body;
+
+      if (!attendance_date || !emp_code_of_thetechnician) {
+        return res.status(400).json({ error: 'Attendance date and Employee Code are required' });
+      }
+
+      // Check if employee exists
+      const emp = await db.getEmployeeByCode(emp_code_of_thetechnician, false);
+      const techName = name_of_technician || emp?.employee_name || emp_code_of_thetechnician;
+      const techCenterCode = center_code || emp?.center_code || 'Unassigned';
+      const techCenterName = emp?.center_name || 'Unassigned';
+      const techCenterLocation = emp?.center_location || 'Main Center';
+
+      // Format times to YYYY-MM-DD HH:mm:ss
+      const formatTime = (t: string | undefined | null) => {
+        if (!t || !t.trim()) return null;
+        const str = t.trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str;
+        return `${attendance_date} ${str.length === 5 ? str + ':00' : str}`;
+      };
+
+      const inTime = formatTime(on_duty_in_time);
+      const breakOutTime = formatTime(intermidiate_off_out_time);
+      const breakInTime = formatTime(intermidiate_off_in_time);
+      const outTime = formatTime(on_duty_out_time);
+
+      // Accurate Calculations based on business logic
+      let totalBreak = 0.00;
+      if (breakOutTime && breakInTime) {
+        totalBreak = calculateHours(breakOutTime, breakInTime, attendance_date);
+      }
+
+      let totalWork = 0.00;
+      if (inTime && outTime) {
+        totalWork = calculateHours(inTime, outTime, attendance_date);
+      }
+
+      const effectiveWork = calculateEffectiveHours(totalWork, totalBreak);
+      const currentIstDateTime = getIstDateTimeString();
+
+      const payload: any = {
+        attendance_date,
+        emp_code_of_thetechnician,
+        name_of_technician: techName,
+        center_code: techCenterCode,
+        center_name: techCenterName,
+        center_location: techCenterLocation,
+        on_duty_in_time: inTime,
+        intermidiate_off_out_time: breakOutTime,
+        intermidiate_off_in_time: breakInTime,
+        on_duty_out_time: outTime,
+        total_working_hrs: totalWork,
+        total_break_hrs: totalBreak,
+        effective_working_hrs: effectiveWork,
+        all_innitial_time: inTime || currentIstDateTime,
+        last_edit_timestamp: currentIstDateTime,
+        last_edited_by: req.user!.employee_code,
+        admin_remarks: admin_remarks || 'Manual record added by Admin'
+      };
+
+      const success = await db.markAttendance(payload);
+      if (!success) {
+        return res.status(500).json({ error: 'Failed to create attendance record in database' });
+      }
+
+      const createdRecord = await db.getTodayAttendance(emp_code_of_thetechnician, attendance_date);
+
+      return res.json({
+        success: true,
+        message: `Attendance created successfully for ${techName} (${emp_code_of_thetechnician}) on ${attendance_date}`,
+        attendance: createdRecord || payload
+      });
+    } catch (err: any) {
+      console.error('Manual attendance create error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to create manual attendance' });
+    }
+  });
+
+  // Manual Attendance Edit / Update (Admin / Super Admin / TeamLeader)
+  app.post(['/api/attendance/manual-update', '/api/admin/attendance/manual-update'], requireAuth, requireRole(['Admin', 'Super Admin', 'TeamLeader']), async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const {
+        attendance_date,
+        emp_code_of_thetechnician,
+        name_of_technician,
+        on_duty_in_time,
+        intermidiate_off_out_time,
+        intermidiate_off_in_time,
+        on_duty_out_time,
+        admin_remarks
+      } = req.body;
+
+      if (!attendance_date || !emp_code_of_thetechnician) {
+        return res.status(400).json({ error: 'Attendance date and Employee Code are required' });
+      }
+
+      const formatTime = (t: string | undefined | null) => {
+        if (!t || !t.trim()) return null;
+        const str = t.trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str;
+        return `${attendance_date} ${str.length === 5 ? str + ':00' : str}`;
+      };
+
+      const inTime = formatTime(on_duty_in_time);
+      const breakOutTime = formatTime(intermidiate_off_out_time);
+      const breakInTime = formatTime(intermidiate_off_in_time);
+      const outTime = formatTime(on_duty_out_time);
+
+      let totalBreak = 0.00;
+      if (breakOutTime && breakInTime) {
+        totalBreak = calculateHours(breakOutTime, breakInTime, attendance_date);
+      }
+
+      let totalWork = 0.00;
+      if (inTime && outTime) {
+        totalWork = calculateHours(inTime, outTime, attendance_date);
+      }
+
+      const effectiveWork = calculateEffectiveHours(totalWork, totalBreak);
+      const currentIstDateTime = getIstDateTimeString();
+
+      const payload: any = {
+        attendance_date,
+        emp_code_of_thetechnician,
+        on_duty_in_time: inTime,
+        intermidiate_off_out_time: breakOutTime,
+        intermidiate_off_in_time: breakInTime,
+        on_duty_out_time: outTime,
+        total_working_hrs: totalWork,
+        total_break_hrs: totalBreak,
+        effective_working_hrs: effectiveWork,
+        last_edit_timestamp: currentIstDateTime,
+        last_edited_by: req.user!.employee_code,
+        admin_remarks: admin_remarks || 'Manually updated by Admin'
+      };
+
+      if (name_of_technician) {
+        payload.name_of_technician = name_of_technician;
+      }
+
+      const success = await db.markAttendance(payload);
+      if (!success) {
+        return res.status(500).json({ error: 'Failed to update attendance record' });
+      }
+
+      const updatedRecord = await db.getTodayAttendance(emp_code_of_thetechnician, attendance_date);
+
+      return res.json({
+        success: true,
+        message: `Attendance updated successfully for ${emp_code_of_thetechnician} on ${attendance_date}`,
+        attendance: updatedRecord || payload
+      });
+    } catch (err: any) {
+      console.error('Manual attendance update error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to update manual attendance' });
+    }
+  });
+
   // ==================== WORK ORDERS API ====================
 
   // 1. View Work Orders (Role Enforced)

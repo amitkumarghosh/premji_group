@@ -40,58 +40,82 @@ const hasSftpConfig = () => {
   );
 };
 
-// Singleton connection mutex to serialize and reuse SFTP client connections safely
+// High-performance persistent SFTP Connection Manager with connection reuse & idle pooling
 class SftpConnectionManager {
   private client: Client | null = null;
   private isConnecting = false;
-  private queue: Array<() => void> = [];
-  private lastErrorTime = 0;
-  private readonly ERROR_COOLDOWN_MS = 10000; // 10s cooldown on handshake failures
+  private connectPromise: Promise<Client | null> | null = null;
+  private idleTimer: any = null;
 
-  private async acquireLock(): Promise<void> {
-    if (!this.isConnecting) {
-      this.isConnecting = true;
-      return;
+  private resetIdleTimer() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      if (this.client) {
+        this.client.end().catch(() => {});
+        this.client = null;
+      }
+    }, 45000); // 45s idle disconnect
+    if (this.idleTimer && typeof this.idleTimer.unref === 'function') {
+      this.idleTimer.unref();
     }
-    return new Promise((resolve) => {
-      this.queue.push(resolve);
-    });
   }
 
-  private releaseLock(): void {
-    if (this.queue.length > 0) {
-      const next = this.queue.shift();
-      if (next) next();
-    } else {
-      this.isConnecting = false;
+  private async getClient(): Promise<Client | null> {
+    if (!hasSftpConfig()) return null;
+
+    if (this.client) {
+      this.resetIdleTimer();
+      return this.client;
     }
+
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
+
+    this.connectPromise = (async () => {
+      try {
+        const client = new Client();
+        client.on('error', (err) => {
+          console.warn('[SFTP Connection Warning]', err?.message);
+          this.client = null;
+        });
+        client.on('end', () => {
+          this.client = null;
+        });
+        client.on('close', () => {
+          this.client = null;
+        });
+
+        await client.connect(SFTP_CONFIG);
+        this.client = client;
+        this.resetIdleTimer();
+        return client;
+      } catch (err: any) {
+        console.warn(`[SFTP Connect Failed]: ${err?.message}`);
+        this.client = null;
+        return null;
+      } finally {
+        this.connectPromise = null;
+      }
+    })();
+
+    return this.connectPromise;
   }
 
   async withClient<T>(operation: (client: Client) => Promise<T>): Promise<T | null> {
-    if (!hasSftpConfig()) return null;
+    const client = await this.getClient();
+    if (!client) return null;
 
-    // Circuit breaker if recent fatal connection loss
-    if (Date.now() - this.lastErrorTime < this.ERROR_COOLDOWN_MS) {
-      return null;
-    }
-
-    await this.acquireLock();
-    const sftp = new Client();
     try {
-      await sftp.connect(SFTP_CONFIG);
-      const result = await operation(sftp);
-      await sftp.end();
-      return result;
+      this.resetIdleTimer();
+      return await operation(client);
     } catch (err: any) {
-      this.lastErrorTime = Date.now();
-      // Silently record warning and fallback
-      console.warn(`[SFTP Notice] Remote storage connection unavailable: ${err.message}`);
-      try {
-        await sftp.end();
-      } catch {}
+      console.warn(`[SFTP Operation Notice]: ${err?.message}`);
+      // If broken pipe or connection lost, reset
+      if (String(err?.message || '').toLowerCase().includes('closed') || String(err?.message || '').toLowerCase().includes('not connected')) {
+        this.client = null;
+      }
       return null;
-    } finally {
-      this.releaseLock();
     }
   }
 }
@@ -190,8 +214,13 @@ export const sftpStorage = {
       path.join(TMP_UPLOADS_DIR, baseName),
       path.resolve(process.cwd(), 'data', 'uploads', cleanPath),
       path.resolve(process.cwd(), 'data', 'uploads', baseName),
+      path.resolve(process.cwd(), 'data', 'uploads', 'attendance', cleanPath),
+      path.resolve(process.cwd(), 'data', 'uploads', 'attendance', baseName),
       path.resolve(process.cwd(), 'data', 'uploads', 'attendance', '2026', '09', baseName),
-      path.resolve(process.cwd(), 'data', 'uploads', 'attendance', 'on_duty_in_image', baseName)
+      path.resolve(process.cwd(), 'data', 'uploads', 'attendance', 'on_duty_in_image', baseName),
+      path.resolve(process.cwd(), 'data', 'uploads', 'attendance', 'on_duty_out_image', baseName),
+      path.resolve(process.cwd(), 'data', 'uploads', 'attendance', 'intermidiate_off_out_image', baseName),
+      path.resolve(process.cwd(), 'data', 'uploads', 'attendance', 'intermidiate_off_in_image', baseName)
     ];
 
     for (const p of candidatePaths) {
