@@ -122,9 +122,16 @@ export async function createExpressApp() {
       const cleanCode = String(employee_code).trim();
       const cleanPass = String(password);
 
-      const emp = await db.getEmployeeByCode(cleanCode);
+      const emp = await db.getEmployeeByCode(cleanCode, false);
       if (!emp) {
-        return res.status(401).json({ error: 'Invalid employee code or inactive account status' });
+        return res.status(401).json({ error: 'Employee code not found. Please verify your ID.' });
+      }
+
+      // Inactive check: Login is not possible if the employee status is inactive
+      if (emp.employee_status === 'Inactive' || emp.employee_status === '0') {
+        return res.status(403).json({
+          error: 'Your employee account is marked Inactive. Login is not permitted. Please contact your administrator.'
+        });
       }
 
       // Password comparison (direct or trimmed)
@@ -171,8 +178,28 @@ export async function createExpressApp() {
     return res.json({ success: true, message: 'Logged out successfully' });
   });
 
-  app.get('/api/auth/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-    return res.json({ user: req.user });
+  app.get('/api/auth/me', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const emp = await db.getEmployeeByCode(req.user!.employee_code, false);
+      if (!emp || emp.employee_status === 'Inactive' || emp.employee_status === '0') {
+        res.clearCookie('premji_session');
+        return res.status(403).json({ error: 'Your employee account is marked Inactive. Login is not permitted.' });
+      }
+      return res.json({
+        user: {
+          employee_code: emp.employee_code,
+          employee_name: emp.employee_name,
+          user_role: emp.user_role,
+          center_code: emp.center_code,
+          center_name: emp.center_name,
+          user_details: emp.user_details,
+          employee_doj: emp.employee_doj,
+          employee_status: emp.employee_status
+        }
+      });
+    } catch {
+      return res.json({ user: req.user });
+    }
   });
 
   // ==================== ATTENDANCE API ====================
@@ -731,7 +758,6 @@ export async function createExpressApp() {
     'Team Leader',
     'Management',
     'HO',
-    'Accounts',
     'Director',
     'Manager'
   ];
@@ -963,13 +989,13 @@ export async function createExpressApp() {
 
   app.post('/api/employees', requireAuth, requireRole(['Admin', 'Super Admin']), async (req: Request, res: Response) => {
     try {
-      const { employee_code, employee_name, password, user_role, center_code, mobile_no, email } = req.body;
+      const { employee_code, employee_name, password, user_role, center_code, user_details, employee_doj, employee_status } = req.body;
       if (!employee_code || !employee_name || !password || !user_role) {
         return res.status(400).json({ error: 'Code, Name, Password, and Role are required' });
       }
 
       // Check duplicate
-      const duplicate = await db.getEmployeeByCode(employee_code);
+      const duplicate = await db.getEmployeeByCode(employee_code, false);
       if (duplicate) {
         return res.status(400).json({ error: 'Employee code already exists' });
       }
@@ -989,9 +1015,9 @@ export async function createExpressApp() {
         user_role,
         center_code,
         center_name: centerName,
-        mobile_no,
-        email,
-        employee_status: 'Active'
+        user_details: user_details || null,
+        employee_doj: employee_doj || null,
+        employee_status: employee_status || 'Active'
       });
 
       return res.json({ success: true, message: 'Employee added successfully', employee_id: id });
@@ -1031,6 +1057,82 @@ export async function createExpressApp() {
     } catch (err) {
       console.error('Update employee error:', err);
       return res.status(500).json({ error: 'Failed to update employee' });
+    }
+  });
+
+  // ==================== VEHICLE MODELS API ====================
+
+  app.get('/api/vehicle-models', requireAuth, requireRole(['Admin', 'Super Admin']), async (req: Request, res: Response) => {
+    try {
+      const models = await db.getAllVehicleModels();
+      return res.json({ models });
+    } catch (err: any) {
+      console.error('Fetch vehicle models error:', err);
+      return res.status(500).json({ error: 'Failed to retrieve vehicle models catalog' });
+    }
+  });
+
+  app.post('/api/vehicle-models', requireAuth, requireRole(['Admin', 'Super Admin']), async (req: Request, res: Response) => {
+    try {
+      const { Vehicle_Manufacturer, Vehicle_Model, Vehicle_Variant } = req.body;
+      if (!Vehicle_Manufacturer || !Vehicle_Model) {
+        return res.status(400).json({ error: 'Both Vehicle Manufacturer and Vehicle Model are required.' });
+      }
+
+      const result = await db.createVehicleModel({
+        Vehicle_Manufacturer,
+        Vehicle_Model,
+        Vehicle_Variant
+      });
+
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      return res.json({ success: true, message: 'Vehicle model created successfully', id: result.id });
+    } catch (err: any) {
+      console.error('Create vehicle model error:', err);
+      return res.status(500).json({ error: 'Failed to create vehicle model' });
+    }
+  });
+
+  app.patch('/api/vehicle-models/:id', requireAuth, requireRole(['Admin', 'Super Admin']), async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const { Vehicle_Manufacturer, Vehicle_Model, Vehicle_Variant } = req.body;
+
+      if (!Vehicle_Manufacturer || !Vehicle_Model) {
+        return res.status(400).json({ error: 'Both Vehicle Manufacturer and Vehicle Model are required.' });
+      }
+
+      const result = await db.updateVehicleModel(id, {
+        Vehicle_Manufacturer,
+        Vehicle_Model,
+        Vehicle_Variant
+      });
+
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      return res.json({ success: true, message: 'Vehicle model updated successfully' });
+    } catch (err: any) {
+      console.error('Update vehicle model error:', err);
+      return res.status(500).json({ error: 'Failed to update vehicle model' });
+    }
+  });
+
+  app.delete('/api/vehicle-models/:id', requireAuth, requireRole(['Admin', 'Super Admin']), async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const result = await db.deleteVehicleModel(id);
+      if (!result.success) {
+        return res.status(400).json({ error: 'Failed to delete vehicle model or record not found.' });
+      }
+      return res.json({ success: true, message: 'Vehicle model removed successfully' });
+    } catch (err: any) {
+      console.error('Delete vehicle model error:', err);
+      return res.status(500).json({ error: 'Failed to delete vehicle model' });
     }
   });
 

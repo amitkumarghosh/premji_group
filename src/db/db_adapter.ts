@@ -8,11 +8,11 @@ export interface EmployeeDetails {
   employee_code: string;
   employee_name: string;
   password?: string; // SHA-256 or plain text for easy setup
-  user_role: 'Technician' | 'TeamLeader' | 'Admin' | 'Super Admin';
+  user_role: 'Technician' | 'Accounts' | 'Engineer' | 'TeamLeader' | 'Admin' | 'Super Admin';
   center_code: string | null;
   center_name: string | null;
-  mobile_no: string | null;
-  email: string | null;
+  user_details?: string | null;
+  employee_doj?: string | null;
   employee_status: 'Active' | 'Inactive' | '1' | '0';
   created_at?: string | Date;
   updated_at?: string | Date;
@@ -236,8 +236,8 @@ function getSeedData() {
         user_role: 'Super Admin',
         center_code: 'HQ01',
         center_name: 'Premji Headquarters',
-        mobile_no: '+919999999999',
-        email: 'superadmin@premji.com',
+        user_details: 'Super Administrator & Operations Director',
+        employee_doj: '2022-01-01',
         employee_status: 'Active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -250,8 +250,8 @@ function getSeedData() {
         user_role: 'Admin',
         center_code: 'C01',
         center_name: 'Premji Chennai South',
-        mobile_no: '+919876543210',
-        email: 'admin@premji.com',
+        user_details: 'Workshop Operations Administrator',
+        employee_doj: '2022-06-15',
         employee_status: 'Active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -264,8 +264,8 @@ function getSeedData() {
         user_role: 'TeamLeader',
         center_code: 'C01',
         center_name: 'Premji Chennai South',
-        mobile_no: '+919123456789',
-        email: 'karthik@premji.com',
+        user_details: 'Senior Workshop Floor Lead',
+        employee_doj: '2023-02-01',
         employee_status: 'Active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -278,8 +278,8 @@ function getSeedData() {
         user_role: 'Technician',
         center_code: 'C01',
         center_name: 'Premji Chennai South',
-        mobile_no: '+919812345670',
-        email: 'suresh@premji.com',
+        user_details: 'Diagnostic & Mechanical Specialist',
+        employee_doj: '2023-05-10',
         employee_status: 'Active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -292,8 +292,36 @@ function getSeedData() {
         user_role: 'Technician',
         center_code: 'C02',
         center_name: 'Premji Chennai West',
-        mobile_no: '+919812345671',
-        email: 'ramesh@premji.com',
+        user_details: 'Electrical & AC Specialist',
+        employee_doj: '2023-08-20',
+        employee_status: 'Active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 6,
+        employee_code: 'ACCT01',
+        employee_name: 'Deepa Natarajan',
+        password: 'acct123',
+        user_role: 'Accounts',
+        center_code: 'C01',
+        center_name: 'Premji Chennai South',
+        user_details: 'Accounts Officer - Billing & Invoicing',
+        employee_doj: '2023-09-01',
+        employee_status: 'Active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 7,
+        employee_code: 'ENG01',
+        employee_name: 'Arun Prakash',
+        password: 'eng123',
+        user_role: 'Engineer',
+        center_code: 'C01',
+        center_name: 'Premji Chennai South',
+        user_details: 'Vehicle Systems Engineer',
+        employee_doj: '2023-11-15',
         employee_status: 'Active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -465,17 +493,21 @@ export function cleanRowBuffers<T = any>(data: T): T {
 // Generic database wrapper functions
 export const db = {
   // 1. Employee Auth & Details
-  async getEmployeeByCode(code: string): Promise<EmployeeDetails | null> {
+  async getEmployeeByCode(code: string, activeOnly = false): Promise<EmployeeDetails | null> {
     if (!useLocalDb && mysqlPool) {
-      const [rows]: any = await mysqlPool.execute(
-        'SELECT * FROM employee_details WHERE employee_code = ? AND employee_status IN ("Active", "1") LIMIT 1',
-        [code]
-      );
+      let query = 'SELECT * FROM employee_details WHERE employee_code = ?';
+      if (activeOnly) {
+        query += ' AND employee_status IN ("Active", "1")';
+      }
+      query += ' LIMIT 1';
+      const [rows]: any = await mysqlPool.execute(query, [code]);
       return rows[0] ? cleanRowBuffers(rows[0]) : null;
     } else {
       const store = readLocalDb();
       const emp = store.employee_details.find(
-        (e: any) => e.employee_code.toUpperCase() === code.toUpperCase() && (e.employee_status === 'Active' || e.employee_status === '1')
+        (e: any) =>
+          e.employee_code.toUpperCase() === code.toUpperCase() &&
+          (!activeOnly || e.employee_status === 'Active' || e.employee_status === '1')
       );
       return emp || null;
     }
@@ -495,7 +527,7 @@ export const db = {
     if (!useLocalDb && mysqlPool) {
       const [result]: any = await mysqlPool.execute(
         `INSERT INTO employee_details 
-        (employee_code, employee_name, password, user_role, center_code, center_name, mobile_no, email, employee_status) 
+        (employee_code, employee_name, password, user_role, center_code, center_name, user_details, employee_doj, employee_status) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           employee.employee_code,
@@ -504,8 +536,8 @@ export const db = {
           employee.user_role || 'Technician',
           employee.center_code || null,
           employee.center_name || null,
-          employee.mobile_no || null,
-          employee.email || null,
+          employee.user_details || null,
+          employee.employee_doj || null,
           employee.employee_status || 'Active'
         ]
       );
@@ -521,8 +553,8 @@ export const db = {
         user_role: employee.user_role as any,
         center_code: employee.center_code || null,
         center_name: employee.center_name || null,
-        mobile_no: employee.mobile_no || null,
-        email: employee.email || null,
+        user_details: employee.user_details || null,
+        employee_doj: employee.employee_doj || null,
         employee_status: employee.employee_status || 'Active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -538,11 +570,13 @@ export const db = {
       const fields: string[] = [];
       const values: any[] = [];
       Object.entries(employee).forEach(([key, val]) => {
-        if (key !== 'id' && key !== 'created_at' && key !== 'updated_at') {
+        // Strip out mobile_no and email if passed, as MySQL table does not have them
+        if (key !== 'id' && key !== 'created_at' && key !== 'updated_at' && key !== 'mobile_no' && key !== 'email') {
           fields.push(`${key} = ?`);
           values.push(val);
         }
       });
+      if (fields.length === 0) return true;
       values.push(id);
       const [result]: any = await mysqlPool.execute(
         `UPDATE employee_details SET ${fields.join(', ')} WHERE id = ?`,
@@ -553,9 +587,12 @@ export const db = {
       const store = readLocalDb();
       const index = store.employee_details.findIndex((e: any) => e.id === id);
       if (index === -1) return false;
+      const safeEmployee: any = { ...employee };
+      delete safeEmployee.mobile_no;
+      delete safeEmployee.email;
       store.employee_details[index] = {
         ...store.employee_details[index],
-        ...employee,
+        ...safeEmployee,
         updated_at: new Date().toISOString()
       };
       writeLocalDb(store);
@@ -1511,11 +1548,164 @@ export const db = {
   // 5. Vehicle Model details
   async getVehicleModels(): Promise<VehicleModel[]> {
     if (!useLocalDb && mysqlPool) {
-      const [rows]: any = await mysqlPool.execute('SELECT * FROM vehicle_model');
+      const [rows]: any = await mysqlPool.execute('SELECT * FROM vehicle_model ORDER BY Vehicle_Manufacturer ASC, Vehicle_Model ASC');
       return cleanRowBuffers(rows);
     } else {
       const store = readLocalDb();
-      return store.vehicle_model;
+      return [...(store.vehicle_model || [])].sort((a: any, b: any) => {
+        const mfrDiff = (a.Vehicle_Manufacturer || '').localeCompare(b.Vehicle_Manufacturer || '');
+        if (mfrDiff !== 0) return mfrDiff;
+        return (a.Vehicle_Model || '').localeCompare(b.Vehicle_Model || '');
+      });
+    }
+  },
+
+  async getAllVehicleModels(): Promise<VehicleModel[]> {
+    return this.getVehicleModels();
+  },
+
+  async createVehicleModel(modelData: { Vehicle_Manufacturer: string; Vehicle_Model: string; Vehicle_Variant?: string }): Promise<{ success: boolean; id?: number; error?: string }> {
+    const cleanMfr = (modelData.Vehicle_Manufacturer || '').trim();
+    const cleanModel = (modelData.Vehicle_Model || '').trim();
+
+    if (!cleanMfr || !cleanModel) {
+      return { success: false, error: 'Both Vehicle Manufacturer and Vehicle Model are required.' };
+    }
+
+    if (!useLocalDb && mysqlPool) {
+      // Check duplicate (case-insensitive & trimmed)
+      const [existing]: any = await mysqlPool.execute(
+        'SELECT ID FROM vehicle_model WHERE LOWER(TRIM(Vehicle_Manufacturer)) = LOWER(TRIM(?)) AND LOWER(TRIM(Vehicle_Model)) = LOWER(TRIM(?)) LIMIT 1',
+        [cleanMfr, cleanModel]
+      );
+      if (existing.length > 0) {
+        return { success: false, error: `Duplicate detected: "${cleanMfr} - ${cleanModel}" already exists in the vehicle database.` };
+      }
+
+      // Check max ID in case ID is not auto_increment
+      let nextId: number | null = null;
+      try {
+        const [maxRows]: any = await mysqlPool.execute('SELECT COALESCE(MAX(ID), 0) + 1 AS next_id FROM vehicle_model');
+        nextId = maxRows[0]?.next_id || 1;
+      } catch {}
+
+      let insertId = nextId;
+      try {
+        if (nextId) {
+          const [res]: any = await mysqlPool.execute(
+            'INSERT INTO vehicle_model (ID, Vehicle_Manufacturer, Vehicle_Model) VALUES (?, ?, ?)',
+            [nextId, cleanMfr, cleanModel]
+          );
+          insertId = res.insertId || nextId;
+        } else {
+          const [res]: any = await mysqlPool.execute(
+            'INSERT INTO vehicle_model (Vehicle_Manufacturer, Vehicle_Model) VALUES (?, ?)',
+            [cleanMfr, cleanModel]
+          );
+          insertId = res.insertId;
+        }
+      } catch (err: any) {
+        // Fallback without ID column if auto_increment handles it
+        const [res]: any = await mysqlPool.execute(
+          'INSERT INTO vehicle_model (Vehicle_Manufacturer, Vehicle_Model) VALUES (?, ?)',
+          [cleanMfr, cleanModel]
+        );
+        insertId = res.insertId || nextId;
+      }
+
+      return { success: true, id: insertId || 1 };
+    } else {
+      const store = readLocalDb();
+      if (!store.vehicle_model) store.vehicle_model = [];
+
+      const duplicate = store.vehicle_model.some(
+        (vm: any) =>
+          vm.Vehicle_Manufacturer?.trim().toLowerCase() === cleanMfr.toLowerCase() &&
+          vm.Vehicle_Model?.trim().toLowerCase() === cleanModel.toLowerCase()
+      );
+
+      if (duplicate) {
+        return { success: false, error: `Duplicate detected: "${cleanMfr} - ${cleanModel}" already exists in the vehicle database.` };
+      }
+
+      const nextId = store.vehicle_model.length > 0 ? Math.max(...store.vehicle_model.map((m: any) => m.id || m.ID || 0)) + 1 : 1;
+      const newModel: VehicleModel = {
+        id: nextId,
+        Vehicle_Manufacturer: cleanMfr,
+        Vehicle_Model: cleanModel
+      };
+
+      store.vehicle_model.push(newModel);
+      writeLocalDb(store);
+      return { success: true, id: nextId };
+    }
+  },
+
+  async updateVehicleModel(id: number, modelData: { Vehicle_Manufacturer: string; Vehicle_Model: string; Vehicle_Variant?: string }): Promise<{ success: boolean; error?: string }> {
+    const cleanMfr = (modelData.Vehicle_Manufacturer || '').trim();
+    const cleanModel = (modelData.Vehicle_Model || '').trim();
+
+    if (!cleanMfr || !cleanModel) {
+      return { success: false, error: 'Both Vehicle Manufacturer and Vehicle Model are required.' };
+    }
+
+    if (!useLocalDb && mysqlPool) {
+      // Check duplicate on other records
+      const [existing]: any = await mysqlPool.execute(
+        'SELECT ID FROM vehicle_model WHERE LOWER(TRIM(Vehicle_Manufacturer)) = LOWER(TRIM(?)) AND LOWER(TRIM(Vehicle_Model)) = LOWER(TRIM(?)) AND ID != ? LIMIT 1',
+        [cleanMfr, cleanModel, id]
+      );
+      if (existing.length > 0) {
+        return { success: false, error: `Duplicate detected: "${cleanMfr} - ${cleanModel}" already exists in the vehicle database.` };
+      }
+
+      await mysqlPool.execute(
+        'UPDATE vehicle_model SET Vehicle_Manufacturer = ?, Vehicle_Model = ? WHERE ID = ?',
+        [cleanMfr, cleanModel, id]
+      );
+      return { success: true };
+    } else {
+      const store = readLocalDb();
+      if (!store.vehicle_model) store.vehicle_model = [];
+
+      const duplicate = store.vehicle_model.some(
+        (vm: any) =>
+          (vm.id || vm.ID) !== id &&
+          vm.Vehicle_Manufacturer?.trim().toLowerCase() === cleanMfr.toLowerCase() &&
+          vm.Vehicle_Model?.trim().toLowerCase() === cleanModel.toLowerCase()
+      );
+
+      if (duplicate) {
+        return { success: false, error: `Duplicate detected: "${cleanMfr} - ${cleanModel}" already exists in the vehicle database.` };
+      }
+
+      const idx = store.vehicle_model.findIndex((vm: any) => (vm.id || vm.ID) === id);
+      if (idx === -1) {
+        return { success: false, error: 'Vehicle model record not found.' };
+      }
+
+      store.vehicle_model[idx] = {
+        ...store.vehicle_model[idx],
+        Vehicle_Manufacturer: cleanMfr,
+        Vehicle_Model: cleanModel
+      };
+
+      writeLocalDb(store);
+      return { success: true };
+    }
+  },
+
+  async deleteVehicleModel(id: number): Promise<{ success: boolean; error?: string }> {
+    if (!useLocalDb && mysqlPool) {
+      const [res]: any = await mysqlPool.execute('DELETE FROM vehicle_model WHERE ID = ?', [id]);
+      return { success: res.affectedRows > 0 };
+    } else {
+      const store = readLocalDb();
+      if (!store.vehicle_model) return { success: false };
+      const beforeLen = store.vehicle_model.length;
+      store.vehicle_model = store.vehicle_model.filter((vm: any) => (vm.id || vm.ID) !== id);
+      writeLocalDb(store);
+      return { success: store.vehicle_model.length < beforeLen };
     }
   },
 

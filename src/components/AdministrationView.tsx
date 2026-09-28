@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Users, Building, Plus, Search, Download, CheckCircle, RefreshCw, Edit, ShieldAlert, Eye, EyeOff } from 'lucide-react';
+import { Settings, Users, Building, Plus, Search, Download, CheckCircle, RefreshCw, Edit, ShieldAlert, Eye, EyeOff, Car, Calendar, FileText } from 'lucide-react';
 import { authFetch } from '../utils/api';
+import { VehicleModelsView } from './VehicleModelsView';
 
 interface AdministrationViewProps {
   user: any;
   centers: any[];
+  initialTab?: 'users' | 'centers' | 'vehicles';
   onNotification: (message: string, type: 'success' | 'error' | 'info') => void;
   onRefreshCenters: () => void;
 }
@@ -12,11 +14,12 @@ interface AdministrationViewProps {
 export const AdministrationView: React.FC<AdministrationViewProps> = ({
   user,
   centers,
+  initialTab = 'users',
   onNotification,
   onRefreshCenters
 }) => {
   const isSuperAdmin = user.user_role === 'Super Admin';
-  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'centers'>('users');
+  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'centers' | 'vehicles'>(initialTab);
   const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -27,11 +30,11 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [editUserData, setEditUserData] = useState({
     employee_name: '',
-    user_role: '',
+    user_role: 'Technician',
     center_code: '',
-    mobile_no: '',
-    email: '',
-    employee_status: '',
+    user_details: '',
+    employee_doj: '',
+    employee_status: 'Active',
     password: ''
   });
 
@@ -42,8 +45,9 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     password: '',
     user_role: 'Technician',
     center_code: '',
-    mobile_no: '',
-    email: ''
+    user_details: '',
+    employee_doj: '',
+    employee_status: 'Active'
   });
 
   // Center form state
@@ -107,10 +111,10 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     setSelectedUser(emp);
     setEditUserData({
       employee_name: emp.employee_name || '',
-      user_role: emp.user_role || '',
+      user_role: emp.user_role || 'Technician',
       center_code: emp.center_code || '',
-      mobile_no: emp.mobile_no || '',
-      email: emp.email || '',
+      user_details: emp.user_details || '',
+      employee_doj: emp.employee_doj ? emp.employee_doj.split('T')[0] : '',
       employee_status: emp.employee_status || 'Active',
       password: ''
     });
@@ -164,8 +168,9 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           password: '',
           user_role: 'Technician',
           center_code: '',
-          mobile_no: '',
-          email: ''
+          user_details: '',
+          employee_doj: '',
+          employee_status: 'Active'
         });
         loadEmployees();
       } else {
@@ -231,15 +236,15 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
   const handleExportEmployeesCSV = () => {
     if (employees.length === 0) return;
-    const headers = ['Employee Code', 'Employee Name', 'Role', 'Center Code', 'Center Name', 'Mobile', 'Email', 'Status'];
+    const headers = ['Employee Code', 'Employee Name', 'Role', 'Center Code', 'Center Name', 'Date of Joining', 'User Details', 'Status'];
     const rows = employees.map((e) => [
       `"${e.employee_code}"`,
       `"${e.employee_name}"`,
       `"${e.user_role}"`,
       `"${e.center_code || ''}"`,
       `"${e.center_name || ''}"`,
-      `"${e.mobile_no || ''}"`,
-      `"${e.email || ''}"`,
+      `"${e.employee_doj ? e.employee_doj.split('T')[0] : ''}"`,
+      `"${(e.user_details || '').replace(/"/g, '""')}"`,
       `"${e.employee_status || 'Active'}"`
     ]);
 
@@ -260,6 +265,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     return (
       e.employee_code.toLowerCase().includes(s) ||
       e.employee_name.toLowerCase().includes(s) ||
+      (e.user_details && e.user_details.toLowerCase().includes(s)) ||
       (e.center_name && e.center_name.toLowerCase().includes(s))
     );
   });
@@ -278,10 +284,10 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
           <button
             onClick={() => setActiveAdminTab('users')}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
               activeAdminTab === 'users' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -290,12 +296,21 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           </button>
           <button
             onClick={() => setActiveAdminTab('centers')}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
               activeAdminTab === 'centers' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Building className="w-4 h-4" />
             Manage Centers
+          </button>
+          <button
+            onClick={() => setActiveAdminTab('vehicles')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+              activeAdminTab === 'vehicles' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Car className="w-4 h-4 text-sky-600" />
+            Vehicle Model & Variant
           </button>
         </div>
       </div>
@@ -379,6 +394,8 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                         className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
                       >
                         <option value="Technician">Technician</option>
+                        <option value="Accounts">Accounts</option>
+                        <option value="Engineer">Engineer</option>
                         <option value="TeamLeader">TeamLeader</option>
                         <option value="Admin">Admin</option>
                         {isSuperAdmin && <option value="Super Admin">Super Admin</option>}
@@ -398,50 +415,63 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Workshop Center</label>
-                    <select
-                      value={editUserData.center_code}
-                      onChange={(e) => setEditUserData({ ...editUserData, center_code: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
-                    >
-                      <option value="">Select Center</option>
-                      {centers.map((c) => (
-                        <option key={c.center_code} value={c.center_code}>
-                          {c.center_name} ({c.center_code})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block font-bold text-slate-700 mb-1">Mobile</label>
+                      <label className="block font-bold text-slate-700 mb-1">Workshop Center</label>
+                      <select
+                        value={editUserData.center_code}
+                        onChange={(e) => setEditUserData({ ...editUserData, center_code: e.target.value })}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
+                      >
+                        <option value="">Select Center</option>
+                        {centers.map((c) => (
+                          <option key={c.center_code} value={c.center_code}>
+                            {c.center_name} ({c.center_code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Date of Joining (DOJ)</label>
                       <input
-                        value={editUserData.mobile_no}
-                        onChange={(e) => setEditUserData({ ...editUserData, mobile_no: e.target.value })}
+                        type="date"
+                        value={editUserData.employee_doj}
+                        onChange={(e) => setEditUserData({ ...editUserData, employee_doj: e.target.value })}
                         className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
                       />
                     </div>
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">Reset Password</label>
-                      <div className="relative">
-                        <input
-                          type={showEditPassword ? 'text' : 'password'}
-                          placeholder="Leave blank to keep"
-                          value={editUserData.password}
-                          onChange={(e) => setEditUserData({ ...editUserData, password: e.target.value })}
-                          className="w-full pl-3 pr-9 py-2 bg-white border border-slate-200 rounded-lg"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowEditPassword(!showEditPassword)}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
-                          title={showEditPassword ? 'Hide password' : 'Show password'}
-                        >
-                          {showEditPassword ? <EyeOff className="w-4 h-4 text-sky-600" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">User Details / Remarks</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Specialization, employee details, or remarks..."
+                      value={editUserData.user_details}
+                      onChange={(e) => setEditUserData({ ...editUserData, user_details: e.target.value })}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Reset Password</label>
+                    <div className="relative">
+                      <input
+                        type={showEditPassword ? 'text' : 'password'}
+                        placeholder="Leave blank to keep existing password"
+                        value={editUserData.password}
+                        onChange={(e) => setEditUserData({ ...editUserData, password: e.target.value })}
+                        className="w-full pl-3 pr-9 py-2 bg-white border border-slate-200 rounded-lg"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowEditPassword(!showEditPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                        title={showEditPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showEditPassword ? <EyeOff className="w-4 h-4 text-sky-600" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
 
@@ -517,12 +547,28 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
                     >
                       <option value="Technician">Technician</option>
+                      <option value="Accounts">Accounts</option>
+                      <option value="Engineer">Engineer</option>
                       <option value="TeamLeader">TeamLeader</option>
                       <option value="Admin">Admin</option>
                       {isSuperAdmin && <option value="Super Admin">Super Admin</option>}
                     </select>
                   </div>
 
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Status</label>
+                    <select
+                      value={newUser.employee_status}
+                      onChange={(e) => setNewUser({ ...newUser, employee_status: e.target.value })}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Center</label>
                     <select
@@ -538,28 +584,27 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                       ))}
                     </select>
                   </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Date of Joining (DOJ)</label>
+                    <input
+                      type="date"
+                      value={newUser.employee_doj}
+                      onChange={(e) => setNewUser({ ...newUser, employee_doj: e.target.value })}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
+                    />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Mobile</label>
-                    <input
-                      placeholder="+91..."
-                      value={newUser.mobile_no}
-                      onChange={(e) => setNewUser({ ...newUser, mobile_no: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Email</label>
-                    <input
-                      type="email"
-                      placeholder="name@premji.com"
-                      value={newUser.email}
-                      onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg"
-                    />
-                  </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">User Details / Remarks</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Enter additional employee details, specialization, or notes..."
+                    value={newUser.user_details}
+                    onChange={(e) => setNewUser({ ...newUser, user_details: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg resize-none"
+                  />
                 </div>
 
                 <button
@@ -595,7 +640,8 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                     <th className="p-2.5">Name</th>
                     <th className="p-2.5">Role</th>
                     <th className="p-2.5">Center</th>
-                    <th className="p-2.5">Mobile</th>
+                    <th className="p-2.5">DOJ</th>
+                    <th className="p-2.5">User Details</th>
                     <th className="p-2.5">Status</th>
                     <th className="p-2.5 text-center">Action</th>
                   </tr>
@@ -609,7 +655,10 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                         <span className="font-semibold text-slate-700">{emp.user_role}</span>
                       </td>
                       <td className="p-2.5">{emp.center_name || emp.center_code || '—'}</td>
-                      <td className="p-2.5 font-mono text-slate-500">{emp.mobile_no || '—'}</td>
+                      <td className="p-2.5 font-mono text-slate-600">{emp.employee_doj ? emp.employee_doj.split('T')[0] : '—'}</td>
+                      <td className="p-2.5 text-slate-600 max-w-[200px] truncate" title={emp.user_details || ''}>
+                        {emp.user_details || '—'}
+                      </td>
                       <td className="p-2.5">
                         <span
                           className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -624,7 +673,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                       <td className="p-2.5 text-center">
                         <button
                           onClick={() => handleSelectUserToEdit(emp)}
-                          className="px-2 py-1 text-sky-600 hover:bg-sky-50 rounded font-semibold"
+                          className="px-2 py-1 text-sky-600 hover:bg-sky-50 rounded font-semibold cursor-pointer"
                         >
                           Edit
                         </button>
@@ -819,6 +868,14 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
             </table>
           </div>
         </div>
+      )}
+
+      {/* ================= TAB 3: VEHICLE MODEL & VARIANT ================= */}
+      {activeAdminTab === 'vehicles' && (
+        <VehicleModelsView
+          onNotification={onNotification}
+          onRefreshLookups={onRefreshCenters}
+        />
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, Building, Phone, Mail, Shield, CheckCircle, Clock } from 'lucide-react';
+import { User, Building, Calendar, FileText, Shield, CheckCircle } from 'lucide-react';
 
 interface ProfileViewProps {
   user: any;
@@ -44,18 +44,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user }) => {
 
         <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Phone className="w-3.5 h-3.5 text-slate-500" />
-            Contact Mobile
+            <Calendar className="w-3.5 h-3.5 text-slate-500" />
+            Date of Joining (DOJ)
           </div>
-          <div className="font-bold text-slate-800 font-mono mt-1">{user.mobile_no || '+91 (Registered in ERP)'}</div>
+          <div className="font-bold text-slate-800 font-mono mt-1">
+            {user.employee_doj ? user.employee_doj.split('T')[0] : 'Recorded in HR File'}
+          </div>
         </div>
 
         <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Mail className="w-3.5 h-3.5 text-slate-500" />
-            Official Email
+            <FileText className="w-3.5 h-3.5 text-slate-500" />
+            User Details
           </div>
-          <div className="font-bold text-slate-800 mt-1">{user.email || `${user.employee_code.toLowerCase()}@premji.com`}</div>
+          <div className="font-bold text-slate-800 mt-1">
+            {user.user_details || 'Verified Enterprise User'}
+          </div>
         </div>
       </div>
 

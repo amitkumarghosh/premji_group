@@ -18,7 +18,7 @@ function base64UrlDecode(str: string): string {
 export interface JwtPayload {
   employee_code: string;
   employee_name: string;
-  user_role: 'Technician' | 'TeamLeader' | 'Admin' | 'Super Admin';
+  user_role: 'Technician' | 'Accounts' | 'Engineer' | 'TeamLeader' | 'Admin' | 'Super Admin';
   center_code: string | null;
   center_name: string | null;
   exp: number;

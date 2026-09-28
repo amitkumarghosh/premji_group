@@ -16,7 +16,8 @@ import {
   Building2,
   Shield,
   Eye,
-  EyeOff
+  EyeOff,
+  Car
 } from 'lucide-react';
 
 import { AttendanceCapture } from './components/AttendanceCapture';
@@ -27,6 +28,7 @@ import { AdministrationView } from './components/AdministrationView';
 import { AttendanceRecordsView } from './components/AttendanceRecordsView';
 import { UpdateWOStatusView } from './components/UpdateWOStatusView';
 import { ProfileView } from './components/ProfileView';
+import { VehicleModelsView } from './components/VehicleModelsView';
 import { authFetch } from './utils/api';
 
 export type ActiveTab =
@@ -37,14 +39,18 @@ export type ActiveTab =
   | 'administration'
   | 'admin-report'
   | 'update-wo-status'
+  | 'vehicle-models'
   | 'profile';
 
 interface CurrentUser {
   employee_code: string;
   employee_name: string;
-  user_role: 'Technician' | 'TeamLeader' | 'Admin' | 'Super Admin';
+  user_role: 'Technician' | 'Accounts' | 'Engineer' | 'TeamLeader' | 'Admin' | 'Super Admin';
   center_code: string | null;
   center_name: string | null;
+  user_details?: string | null;
+  employee_doj?: string | null;
+  employee_status?: string | null;
 }
 
 // Robust role normalizer to guarantee seamless navigation across all role variants
@@ -58,6 +64,10 @@ function normalizeUser(rawUser: any): CurrentUser | null {
     normalizedRole = 'Admin';
   } else if (rawRole.includes('lead') || rawRole === 'tl') {
     normalizedRole = 'TeamLeader';
+  } else if (rawRole.includes('account')) {
+    normalizedRole = 'Accounts';
+  } else if (rawRole.includes('engineer')) {
+    normalizedRole = 'Engineer';
   } else {
     normalizedRole = 'Technician';
   }
@@ -67,7 +77,10 @@ function normalizeUser(rawUser: any): CurrentUser | null {
     employee_name: String(rawUser.employee_name || 'Staff Member').trim(),
     user_role: normalizedRole,
     center_code: rawUser.center_code || null,
-    center_name: rawUser.center_name || null
+    center_name: rawUser.center_name || null,
+    user_details: rawUser.user_details || null,
+    employee_doj: rawUser.employee_doj || null,
+    employee_status: rawUser.employee_status || 'Active'
   };
 }
 
@@ -239,7 +252,9 @@ export default function App() {
       const res = await authFetch('/api/employees');
       if (res.ok) {
         const data = await res.json();
-        const techs = (data.employees || []).filter((emp: any) => emp.user_role === 'Technician');
+        const techs = (data.employees || []).filter((emp: any) =>
+          ['Technician', 'Accounts', 'Engineer'].includes(emp.user_role)
+        );
         setAllTechnicians(techs);
       }
     } catch (e) {
@@ -275,7 +290,8 @@ export default function App() {
   const getNavItems = () => {
     if (!user) return [];
 
-    if (user.user_role === 'Technician') {
+    // Technician, Accounts, Engineer all share the exact same permissions and tabs
+    if (['Technician', 'Accounts', 'Engineer'].includes(user.user_role)) {
       return [
         { id: 'attendance', label: 'Attendance', icon: Clock },
         { id: 'profile', label: 'Profile', icon: User }
@@ -292,10 +308,11 @@ export default function App() {
       ];
     }
 
-    // Admin & Super Admin
+    // Admin & Super Admin: Includes direct navigation to Update Vehicle Model & Variant
     return [
       { id: 'attendance', label: 'Attendance', icon: Clock },
       { id: 'administration', label: 'Administration', icon: Settings },
+      { id: 'vehicle-models', label: 'Vehicle Model & Variant', icon: Car },
       { id: 'admin-report', label: 'Attendance Records', icon: Calendar },
       { id: 'workorders', label: 'View Work Orders', icon: Briefcase },
       { id: 'update-wo-status', label: 'Update workorder status', icon: RefreshCw },
@@ -306,12 +323,12 @@ export default function App() {
   // Enforce tab access security
   useEffect(() => {
     if (user) {
-      if (user.user_role === 'Technician') {
+      if (['Technician', 'Accounts', 'Engineer'].includes(user.user_role)) {
         if (!['attendance', 'profile'].includes(activeTab)) {
           setActiveTab('attendance');
         }
       } else if (user.user_role === 'TeamLeader') {
-        if (['administration', 'admin-report', 'update-wo-status'].includes(activeTab)) {
+        if (['administration', 'admin-report', 'update-wo-status', 'vehicle-models'].includes(activeTab)) {
           setActiveTab('workorders');
         }
       } else if (['Admin', 'Super Admin'].includes(user.user_role)) {
@@ -598,12 +615,19 @@ export default function App() {
             />
           )}
 
+          {user && activeTab === 'vehicle-models' && (
+            <VehicleModelsView
+              onNotification={showNotification}
+              onRefreshLookups={loadManufacturers}
+            />
+          )}
+
           {user && activeTab === 'profile' && (
             <ProfileView user={user} />
           )}
 
           {/* Safe Fallback: Guarantees main content view is never blank */}
-          {user && !['attendance', 'mark-other', 'workorders', 'create-update-wo', 'administration', 'admin-report', 'update-wo-status', 'profile'].includes(activeTab) && (
+          {user && !['attendance', 'mark-other', 'workorders', 'create-update-wo', 'administration', 'admin-report', 'update-wo-status', 'vehicle-models', 'profile'].includes(activeTab) && (
             <AttendanceCapture
               user={user}
               onNotification={showNotification}
