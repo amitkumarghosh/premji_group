@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Calendar,
   Search,
@@ -21,7 +21,12 @@ import {
   Check,
   RotateCcw,
   Sparkles,
-  Info
+  Info,
+  CheckSquare,
+  Square,
+  ArrowRight,
+  XCircle,
+  AlertTriangle
 } from 'lucide-react';
 import { formatPhotoUrl, FALLBACK_IMAGE_SVG } from '../utils/photoUtils.ts';
 import { authFetch } from '../utils/api.ts';
@@ -44,10 +49,10 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
 }) => {
   const today = getIstDateString();
 
-  // Navigation Tab State
+  // Main Navigation Tab
   const [activeTab, setActiveTab] = useState<TabType>('summary');
 
-  // Employee Master List for Dropdowns
+  // Employee Master List
   const [employees, setEmployees] = useState<any[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
 
@@ -64,7 +69,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     total_centers: 0
   });
 
-  // Default filter date strictly TODAY
+  // Default filter date is strictly TODAY
   const [filters, setFilters] = useState({
     start_date: today,
     end_date: today,
@@ -73,23 +78,28 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     search: ''
   });
 
-  // ==================== TAB 2: ADD ATTENDANCE STATE ====================
+  // ==================== TAB 2: ADD ATTENDANCE (MULTI-SELECT) STATE ====================
   const [addForm, setAddForm] = useState({
     attendance_date: today,
-    emp_code_of_thetechnician: '',
-    name_of_technician: '',
-    center_code: '',
     on_duty_in_time: '09:30',
     intermidiate_off_out_time: '13:00',
     intermidiate_off_in_time: '13:45',
     on_duty_out_time: '18:30',
     admin_remarks: ''
   });
+  const [selectedAddEmpCodes, setSelectedAddEmpCodes] = useState<string[]>([]);
+  const [addEmpSearch, setAddEmpSearch] = useState('');
+  const [addCenterFilter, setAddCenterFilter] = useState('');
   const [submittingAdd, setSubmittingAdd] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    message: string;
+    existingEmployees: Array<{ emp_code: string; name: string }>;
+  } | null>(null);
 
   // ==================== TAB 3: EDIT ATTENDANCE STATE ====================
   const [editSearchDate, setEditSearchDate] = useState(today);
   const [editSearchEmpCode, setEditSearchEmpCode] = useState('');
+  const [editEmpFilterQuery, setEditEmpFilterQuery] = useState('');
   const [selectedRecordToEdit, setSelectedRecordToEdit] = useState<any | null>(null);
   const [editForm, setEditForm] = useState({
     id: null as number | null,
@@ -124,6 +134,27 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     };
     loadEmployees();
   }, []);
+
+  // Filtered employees for Add tab
+  const filteredAddEmployees = useMemo(() => {
+    return employees.filter((emp) => {
+      const matchSearch =
+        !addEmpSearch ||
+        emp.employee_name.toLowerCase().includes(addEmpSearch.toLowerCase()) ||
+        emp.employee_code.toLowerCase().includes(addEmpSearch.toLowerCase());
+      const matchCenter = !addCenterFilter || emp.center_code === addCenterFilter;
+      return matchSearch && matchCenter;
+    });
+  }, [employees, addEmpSearch, addCenterFilter]);
+
+  // Filtered employees for Edit tab dropdown
+  const filteredEditEmployees = useMemo(() => {
+    if (!editEmpFilterQuery) return employees;
+    return employees.filter((emp) =>
+      emp.employee_name.toLowerCase().includes(editEmpFilterQuery.toLowerCase()) ||
+      emp.employee_code.toLowerCase().includes(editEmpFilterQuery.toLowerCase())
+    );
+  }, [employees, editEmpFilterQuery]);
 
   // Fetch Attendance Records for Summary Tab
   const loadRecords = async () => {
@@ -245,7 +276,6 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     onNotification('Attendance CSV report downloaded successfully!', 'success');
   };
 
-  // Helper for parsing time field to HH:mm
   const formatTimeToInput = (timeVal: string | null | undefined): string => {
     if (!timeVal) return '';
     const str = String(timeVal).trim();
@@ -260,7 +290,6 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     return str.slice(0, 5);
   };
 
-  // Helper for live hours calculation
   const calculateLiveFormHours = (
     inTime: string,
     breakOut: string,
@@ -284,78 +313,100 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     }
 
     const effectiveHours = calculateEffectiveHours(grossHours, breakHours);
-
     return { grossHours, breakHours, effectiveHours };
   };
 
-  // ==================== TAB 2: ADD ATTENDANCE HANDLER ====================
-  const handleAddEmployeeSelect = (empCode: string) => {
-    const emp = employees.find(e => e.employee_code === empCode);
-    setAddForm(prev => ({
-      ...prev,
-      emp_code_of_thetechnician: empCode,
-      name_of_technician: emp ? emp.employee_name : '',
-      center_code: emp ? emp.center_code || '' : ''
-    }));
+  // ==================== TAB 2: MULTI-SELECT HANDLERS ====================
+  const toggleSelectEmployee = (empCode: string) => {
+    setDuplicateWarning(null);
+    setSelectedAddEmpCodes(prev =>
+      prev.includes(empCode) ? prev.filter(c => c !== empCode) : [...prev, empCode]
+    );
   };
 
-  const handleAddSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!addForm.emp_code_of_thetechnician) {
-      onNotification('Please select an employee.', 'error');
-      return;
-    }
-    if (!addForm.attendance_date) {
-      onNotification('Please select attendance date.', 'error');
+  const handleSelectAllFiltered = () => {
+    setDuplicateWarning(null);
+    const codes = filteredAddEmployees.map(e => e.employee_code);
+    setSelectedAddEmpCodes(prev => Array.from(new Set([...prev, ...codes])));
+  };
+
+  const handleDeselectAll = () => {
+    setDuplicateWarning(null);
+    setSelectedAddEmpCodes([]);
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent, skipExisting = false) => {
+    if (e) e.preventDefault();
+    if (selectedAddEmpCodes.length === 0) {
+      onNotification('Please select at least one employee.', 'error');
       return;
     }
 
     try {
       setSubmittingAdd(true);
+      setDuplicateWarning(null);
+
       const res = await authFetch('/api/attendance/manual-create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           attendance_date: addForm.attendance_date,
-          emp_code_of_thetechnician: addForm.emp_code_of_thetechnician,
-          name_of_technician: addForm.name_of_technician,
-          center_code: addForm.center_code,
+          emp_codes: selectedAddEmpCodes,
           on_duty_in_time: addForm.on_duty_in_time,
           intermidiate_off_out_time: addForm.intermidiate_off_out_time,
           intermidiate_off_in_time: addForm.intermidiate_off_in_time,
           on_duty_out_time: addForm.on_duty_out_time,
-          admin_remarks: addForm.admin_remarks || 'Manually entered by Admin'
+          admin_remarks: addForm.admin_remarks || 'Manually entered by Admin',
+          skip_existing: skipExisting
         })
       });
 
       const data = await res.json();
+
+      if (res.status === 409 && data.has_existing) {
+        // Attendance already exists for one or more employees
+        setDuplicateWarning({
+          message: data.error || 'Attendance record is already available for some employees. You can edit them in the Edit Attendance tab.',
+          existingEmployees: data.existing_employees || []
+        });
+        onNotification(data.error, 'error');
+        return;
+      }
+
       if (res.ok && data.success) {
         onNotification(data.message || 'Attendance created successfully!', 'success');
-        // Reset or switch tab
-        setAddForm({
-          attendance_date: today,
-          emp_code_of_thetechnician: '',
-          name_of_technician: '',
-          center_code: '',
-          on_duty_in_time: '09:30',
-          intermidiate_off_out_time: '13:00',
-          intermidiate_off_in_time: '13:45',
-          on_duty_out_time: '18:30',
-          admin_remarks: ''
-        });
+        setSelectedAddEmpCodes([]);
+        setDuplicateWarning(null);
         loadRecords();
       } else {
-        onNotification(data.error || 'Failed to create attendance record', 'error');
+        onNotification(data.error || 'Failed to create attendance records', 'error');
       }
     } catch (err: any) {
       console.error(err);
-      onNotification('Network error while saving attendance record', 'error');
+      onNotification('Network error saving attendance', 'error');
     } finally {
       setSubmittingAdd(false);
     }
   };
 
-  // ==================== TAB 3: EDIT ATTENDANCE HANDLERS ====================
+  // Switch to Edit tab with specific employee & date
+  const handleJumpToEdit = (empCode: string, dateStr: string) => {
+    setEditSearchDate(dateStr);
+    setEditSearchEmpCode(empCode);
+    setActiveTab('edit');
+    // Trigger lookup
+    setTimeout(() => {
+      authFetch(`/api/attendance/record-by-date-emp?date=${dateStr}&employee_code=${empCode}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d.record) {
+            loadRecordForEditing(d.record);
+          }
+        });
+    }, 100);
+  };
+
+  // ==================== TAB 3: EDIT HANDLERS ====================
   const loadRecordForEditing = (record: any) => {
     setSelectedRecordToEdit(record);
     setEditForm({
@@ -370,6 +421,8 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
       on_duty_out_time: formatTimeToInput(record.on_duty_out_time),
       admin_remarks: record.admin_remarks || ''
     });
+    setEditSearchDate(record.attendance_date);
+    setEditSearchEmpCode(record.emp_code_of_thetechnician);
     setActiveTab('edit');
   };
 
@@ -386,10 +439,9 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
       const data = await res.json();
       if (res.ok && data.record) {
         loadRecordForEditing(data.record);
-        onNotification(`Found attendance record for ${data.record.name_of_technician} on ${editSearchDate}`, 'success');
+        onNotification(`Found record for ${data.record.name_of_technician} on ${editSearchDate}`, 'success');
       } else {
         setSelectedRecordToEdit(null);
-        // Pre-fill blank edit form
         const emp = employees.find(e => e.employee_code === editSearchEmpCode);
         setEditForm({
           id: null,
@@ -403,7 +455,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
           on_duty_out_time: '',
           admin_remarks: ''
         });
-        onNotification('No attendance found for this date. You can fill out the form to add it.', 'info');
+        onNotification('No record found for this date. You can fill the fields to create it.', 'info');
       }
     } catch (err) {
       console.error(err);
@@ -453,7 +505,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     }
   };
 
-  // Live calculations for Add & Edit forms
+  // Live calculation objects
   const addCalculations = calculateLiveFormHours(
     addForm.on_duty_in_time,
     addForm.intermidiate_off_out_time,
@@ -472,7 +524,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Main Navigation Tabs */}
+      {/* Top 3 Navigation Tabs */}
       <div className="flex flex-wrap items-center gap-2 p-1.5 rounded-2xl bg-slate-200/80 p-1 backdrop-blur-md shadow-inner">
         <button
           type="button"
@@ -497,7 +549,12 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
           }`}
         >
           <PlusCircle className="h-4 w-4 text-emerald-600" />
-          <span>Add Attendance</span>
+          <span>Add Attendance (Single / Multi)</span>
+          {selectedAddEmpCodes.length > 0 && (
+            <span className="ml-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
+              {selectedAddEmpCodes.length}
+            </span>
+          )}
         </button>
 
         <button
@@ -519,19 +576,17 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'summary' && (
         <div className="space-y-6">
-          {/* Top Banner */}
+          {/* Header Banner */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-3xl border border-sky-100 bg-white/90 shadow-md backdrop-blur-xl">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-100 text-xl shadow-inner">
-                  📊
-                </span>
-                <div>
-                  <h2 className="text-lg font-black text-slate-900">Attendance Search &amp; Master Summary</h2>
-                  <p className="text-xs text-slate-500 font-medium">
-                    Shift metrics, break durations, uncropped audit photos, and granular logs.
-                  </p>
-                </div>
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-100 text-xl shadow-inner">
+                📈
+              </span>
+              <div>
+                <h2 className="text-lg font-black text-slate-900">Attendance Search &amp; Master Summary</h2>
+                <p className="text-xs text-slate-500 font-medium">
+                  Real-time shift metrics, break durations, uncropped audit photos, and granular logs.
+                </p>
               </div>
             </div>
 
@@ -557,7 +612,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
             </div>
           </div>
 
-          {/* 5 High-Level Metric Aggregation Cards */}
+          {/* 5 High-Level Summary Metric Cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
             <div className="rounded-2xl border border-sky-100 bg-white/90 p-4 shadow-sm backdrop-blur-xl">
               <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
@@ -626,7 +681,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
             </div>
           </div>
 
-          {/* Filter & Range Bar */}
+          {/* Filter Bar (Defaults to Today) */}
           <div className="p-5 rounded-3xl border border-sky-100 bg-white/90 shadow-md backdrop-blur-xl">
             <form onSubmit={handleSearchSubmit} className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
@@ -960,7 +1015,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                             )}
                           </td>
 
-                          {/* Edit Action */}
+                          {/* Direct Edit Action */}
                           <td className="py-3 px-4 text-center whitespace-nowrap">
                             <button
                               type="button"
@@ -984,10 +1039,52 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: ADD ATTENDANCE (MANUAL ENTRY)                                       */}
+      {/* TAB 2: ADD ATTENDANCE (SINGLE & MULTI-EMPLOYEE SELECTION)                  */}
       {/* ========================================================================= */}
       {activeTab === 'add' && (
         <div className="max-w-4xl mx-auto space-y-6">
+          {/* Duplicate Conflict Alert Banner */}
+          {duplicateWarning && (
+            <div className="p-5 rounded-3xl border border-amber-300 bg-amber-50 text-amber-950 shadow-lg space-y-3">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-6 w-6 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-sm font-black text-amber-900">
+                    Attendance Record Already Available
+                  </h4>
+                  <p className="text-xs text-amber-800 mt-0.5">
+                    {duplicateWarning.message}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-amber-200">
+                <span className="text-[11px] font-bold text-amber-900">Existing Records:</span>
+                {duplicateWarning.existingEmployees.map((emp) => (
+                  <button
+                    key={emp.emp_code}
+                    type="button"
+                    onClick={() => handleJumpToEdit(emp.emp_code, addForm.attendance_date)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                  >
+                    <Edit3 className="h-3 w-3" />
+                    <span>Edit {emp.name} ({emp.emp_code})</span>
+                  </button>
+                ))}
+                {selectedAddEmpCodes.length > duplicateWarning.existingEmployees.length && (
+                  <button
+                    type="button"
+                    onClick={(e) => handleAddSubmit(e, true)}
+                    className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-xs cursor-pointer ml-auto"
+                  >
+                    <Check className="h-3 w-3" />
+                    <span>Create for Remaining New Employees</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="p-6 md:p-8 rounded-3xl border border-emerald-100 bg-white/95 shadow-xl backdrop-blur-xl">
             <div className="flex items-center gap-3 border-b border-slate-100 pb-5 mb-6">
               <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700 text-2xl shadow-inner">
@@ -996,64 +1093,122 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
               <div>
                 <h3 className="text-lg font-black text-slate-900">Add Attendance Record</h3>
                 <p className="text-xs text-slate-500">
-                  Manually record full 4-part attendance for a staff member (No camera capture required).
+                  Select one or multiple employees to record full 4-part attendance (No camera capture required).
                 </p>
               </div>
             </div>
 
-            <form onSubmit={handleAddSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {/* Attendance Date */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5 flex items-center gap-1.5">
-                    <Calendar className="h-3.5 w-3.5 text-emerald-600" />
-                    Attendance Date <span className="text-rose-500">*</span>
+            <form onSubmit={(e) => handleAddSubmit(e, false)} className="space-y-6">
+              {/* Date Selection */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-emerald-600" />
+                  Attendance Date <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={addForm.attendance_date}
+                  onChange={(e) => setAddForm({ ...addForm, attendance_date: e.target.value })}
+                  className="w-full sm:w-64 rounded-xl border border-slate-300 px-3.5 py-2 text-xs text-slate-800 font-medium focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Employee Selection: Searchable & Multi-Select */}
+              <div className="space-y-3 p-4 rounded-2xl border border-slate-200 bg-slate-50/70">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <UserCheck className="h-3.5 w-3.5 text-emerald-600" />
+                    Select Employees ({selectedAddEmpCodes.length} selected) <span className="text-rose-500">*</span>
                   </label>
-                  <input
-                    type="date"
-                    required
-                    value={addForm.attendance_date}
-                    onChange={(e) => setAddForm({ ...addForm, attendance_date: e.target.value })}
-                    className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs text-slate-800 font-medium focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none"
-                  />
+
+                  <div className="flex items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllFiltered}
+                      className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg border border-emerald-200 transition cursor-pointer"
+                    >
+                      Select All Filtered
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAll}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium rounded-lg border border-slate-200 transition cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
                 </div>
 
-                {/* Employee Selector */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5 flex items-center gap-1.5">
-                    <UserCheck className="h-3.5 w-3.5 text-emerald-600" />
-                    Select Technician / Employee <span className="text-rose-500">*</span>
-                  </label>
+                {/* Filter and Search Box inside Employee Selection */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search employee name or code..."
+                      value={addEmpSearch}
+                      onChange={(e) => setAddEmpSearch(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 pl-8 pr-3 py-1.5 text-xs text-slate-800 bg-white placeholder-slate-400 focus:border-emerald-500 focus:outline-none"
+                    />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  </div>
+
                   <select
-                    required
-                    value={addForm.emp_code_of_thetechnician}
-                    onChange={(e) => handleAddEmployeeSelect(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs text-slate-800 font-medium focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none bg-white"
+                    value={addCenterFilter}
+                    onChange={(e) => setAddCenterFilter(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-800 bg-white focus:border-emerald-500 focus:outline-none"
                   >
-                    <option value="">-- Choose Employee --</option>
-                    {employees.map((emp) => (
-                      <option key={emp.employee_code} value={emp.employee_code}>
-                        {emp.employee_code} - {emp.employee_name} ({emp.center_name || emp.center_code || 'Main Center'})
-                      </option>
+                    <option value="">All Workshop Centers</option>
+                    {centers.map(c => (
+                      <option key={c.center_code} value={c.center_code}>{c.center_name || c.center_code}</option>
                     ))}
                   </select>
                 </div>
-              </div>
 
-              {/* Selected Employee Badge */}
-              {addForm.emp_code_of_thetechnician && (
-                <div className="p-3 bg-emerald-50/80 rounded-2xl border border-emerald-200 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                    <span className="text-xs font-bold text-emerald-950">
-                      {addForm.name_of_technician} ({addForm.emp_code_of_thetechnician})
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-medium text-emerald-700">
-                    Center: {addForm.center_code || 'Main Center'}
-                  </span>
+                {/* Scrollable Checkbox List of Employees */}
+                <div className="max-h-52 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white p-1">
+                  {loadingEmployees ? (
+                    <div className="py-6 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                      <RefreshCw className="h-4 w-4 animate-spin text-emerald-600" />
+                      <span>Loading staff list...</span>
+                    </div>
+                  ) : filteredAddEmployees.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-slate-400">
+                      No staff members match the search query.
+                    </div>
+                  ) : (
+                    filteredAddEmployees.map((emp) => {
+                      const isSelected = selectedAddEmpCodes.includes(emp.employee_code);
+                      return (
+                        <div
+                          key={emp.employee_code}
+                          onClick={() => toggleSelectEmployee(emp.employee_code)}
+                          className={`flex items-center justify-between p-2.5 rounded-lg text-xs cursor-pointer transition ${
+                            isSelected
+                              ? 'bg-emerald-50 text-emerald-950 font-semibold'
+                              : 'hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {isSelected ? (
+                              <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" />
+                            ) : (
+                              <Square className="h-4 w-4 text-slate-300 shrink-0" />
+                            )}
+                            <div>
+                              <span className="font-bold">{emp.employee_name}</span>
+                              <span className="font-mono text-[11px] text-sky-700 ml-1.5">({emp.employee_code})</span>
+                            </div>
+                          </div>
+                          <span className="text-[11px] text-slate-400 font-medium">
+                            {emp.center_name || emp.center_code || 'Main Center'}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
-              )}
+              </div>
 
               {/* 4 Attendance Checkpoints (Times) */}
               <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-4">
@@ -1088,7 +1243,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                       onChange={(e) => setAddForm({ ...addForm, intermidiate_off_out_time: e.target.value })}
                       className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 font-mono text-xs text-slate-800 focus:border-amber-500 focus:outline-none"
                     />
-                    <div className="text-[10px] text-slate-400 mt-1">Lunch/Break departure</div>
+                    <div className="text-[10px] text-slate-400 mt-1">Lunch departure</div>
                   </div>
 
                   {/* 3. Break In Time */}
@@ -1102,7 +1257,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                       onChange={(e) => setAddForm({ ...addForm, intermidiate_off_in_time: e.target.value })}
                       className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 font-mono text-xs text-slate-800 focus:border-blue-500 focus:outline-none"
                     />
-                    <div className="text-[10px] text-slate-400 mt-1">Lunch/Break return</div>
+                    <div className="text-[10px] text-slate-400 mt-1">Lunch return</div>
                   </div>
 
                   {/* 4. On Duty Out Time */}
@@ -1171,7 +1326,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                 </div>
               </div>
 
-              {/* Submit Button */}
+              {/* Submit Buttons */}
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
@@ -1183,7 +1338,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
 
                 <button
                   type="submit"
-                  disabled={submittingAdd || !addForm.emp_code_of_thetechnician}
+                  disabled={submittingAdd || selectedAddEmpCodes.length === 0}
                   className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs shadow-md shadow-emerald-600/20 hover:from-emerald-700 hover:to-teal-700 transition cursor-pointer disabled:opacity-50"
                 >
                   {submittingAdd ? (
@@ -1194,7 +1349,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                   ) : (
                     <>
                       <Save className="h-4 w-4" />
-                      <span>Save &amp; Record Attendance</span>
+                      <span>Record Attendance ({selectedAddEmpCodes.length} Staff)</span>
                     </>
                   )}
                 </button>
@@ -1213,7 +1368,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
           <div className="p-5 rounded-3xl border border-indigo-100 bg-white/95 shadow-md backdrop-blur-xl">
             <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-900 mb-3 flex items-center gap-2">
               <Search className="h-4 w-4 text-indigo-600" />
-              Select Date &amp; Employee to Edit
+              Select Date &amp; Search Employee to Edit
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1231,20 +1386,29 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                  Employee / Technician
+                  Employee (Type to Search)
                 </label>
-                <select
-                  value={editSearchEmpCode}
-                  onChange={(e) => setEditSearchEmpCode(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none bg-white"
-                >
-                  <option value="">-- Choose Employee to Edit --</option>
-                  {employees.map((emp) => (
-                    <option key={emp.employee_code} value={emp.employee_code}>
-                      {emp.employee_code} - {emp.employee_name}
-                    </option>
-                  ))}
-                </select>
+                <div className="space-y-1">
+                  <input
+                    type="text"
+                    placeholder="Filter staff by name or code..."
+                    value={editEmpFilterQuery}
+                    onChange={(e) => setEditEmpFilterQuery(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:outline-none mb-1"
+                  />
+                  <select
+                    value={editSearchEmpCode}
+                    onChange={(e) => setEditSearchEmpCode(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none bg-white"
+                  >
+                    <option value="">-- Select Employee ({filteredEditEmployees.length}) --</option>
+                    {filteredEditEmployees.map((emp) => (
+                      <option key={emp.employee_code} value={emp.employee_code}>
+                        {emp.employee_code} - {emp.employee_name} ({emp.center_name || emp.center_code || 'Main Center'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="flex items-end">

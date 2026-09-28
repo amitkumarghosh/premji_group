@@ -169,21 +169,23 @@ export const sftpStorage = {
       }
     }
 
-    // 3. Upload to remote SFTP in background/withClient (async non-blocking)
+    // 3. Upload to remote SFTP storage
     if (hasSftpConfig() && buffer && buffer.length > 0) {
-      sftpManager.withClient(async (sftp) => {
-        const targetDir = `${REMOTE_BASE_DIR}/${cleanRelativePath}`.replace(/\/+/g, '/');
-        const targetPath = `${targetDir}/${fileName}`.replace(/\/+/g, '/');
+      try {
+        await sftpManager.withClient(async (sftp) => {
+          const targetDir = `${REMOTE_BASE_DIR}/${cleanRelativePath}`.replace(/\/+/g, '/');
+          const targetPath = `${targetDir}/${fileName}`.replace(/\/+/g, '/');
 
-        const exists = await sftp.exists(targetDir);
-        if (!exists) {
-          await sftp.mkdir(targetDir, true);
-        }
-        await sftp.put(buffer, targetPath);
-        console.log(`✅ Uploaded to VPS SFTP: ${targetPath}`);
-      }).catch((e) => {
-        console.warn('SFTP async upload warning:', e.message);
-      });
+          const exists = await sftp.exists(targetDir);
+          if (!exists) {
+            await sftp.mkdir(targetDir, true);
+          }
+          await sftp.put(buffer, targetPath);
+          console.log(`✅ Uploaded to VPS SFTP: ${targetPath}`);
+        });
+      } catch (e: any) {
+        console.warn('SFTP upload error:', e?.message);
+      }
     }
 
     return displayPath;

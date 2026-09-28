@@ -92,11 +92,19 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
     }
   };
 
+  const [uploadedFallbackImage, setUploadedFallbackImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Start Camera Stream
   const initCamera = async () => {
     setCameraError(null);
     if (cameraStream) {
       cameraStream.getTracks().forEach((t) => t.stop());
+    }
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setCameraError('Camera access is not supported on this browser. You can take or select a photo using the button below.');
+      return;
     }
 
     try {
@@ -123,15 +131,63 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
         videoRef.current.play().catch(() => {});
       }
     } catch (err: any) {
-      console.error('Camera initialization failure:', err);
-      let msg = 'Could not access camera. Please allow camera permissions in your browser.';
-      if (err.name === 'NotAllowedError') {
-        msg = 'Camera permission was denied. Please grant permission in your browser address bar.';
-      } else if (err.name === 'NotFoundError') {
-        msg = 'No camera found on this device.';
+      console.warn('Camera initialization notice:', err?.name || err?.message || err);
+      let msg = 'Could not access camera. Please allow camera permissions in your browser address bar.';
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || String(err?.message || '').includes('Permission')) {
+        msg = 'Camera permission was denied. Please click the lock/camera icon in your browser address bar to Allow Camera, then click "Enable Camera", or snap a photo below.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        msg = 'No camera hardware detected on this device. You can snap or select a photo below.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        msg = 'Camera is in use by another tab or app. Please close other camera apps and retry, or select a photo below.';
       }
       setCameraError(msg);
     }
+  };
+
+  // Handle fallback file / mobile camera capture
+  const handleFallbackFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Draw image centered and scaled
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        // Watermark
+        const timeNow = new Date().toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour12: true,
+          year: 'numeric',
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        ctx.textAlign = 'left';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.70)';
+        ctx.fillRect(8, canvas.height - 34, 400, 26);
+        ctx.fillStyle = '#22c55e';
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText(`● PREMJI SECURE IST: ${timeNow}`, 16, canvas.height - 17);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.80);
+        setUploadedFallbackImage(dataUrl);
+        setCameraError(null);
+        onNotification('Photo captured successfully! Click the punch button below to record attendance.', 'success');
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   };
 
   useEffect(() => {
@@ -150,6 +206,10 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
   // Ultra-Fast Client-Side Compression Pipeline (<30ms execution)
   // Captures the FULL uncropped original camera frame (including entire background & surroundings) for Admin inspection
   const captureAndCompressImage = (): string | null => {
+    if (uploadedFallbackImage) {
+      return uploadedFallbackImage;
+    }
+
     const video = videoRef.current;
 
     // Off-screen canvas sized to 640x480 for lightweight payload (~35KB)
@@ -160,47 +220,28 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    const isVideoPlaying =
-      video &&
-      video.readyState >= 2 &&
-      video.videoWidth > 0 &&
-      !video.paused &&
-      !video.ended;
+    let capturedRealVideo = false;
 
-    if (isVideoPlaying) {
-      // Draw the FULL rectangular uncropped image
-      if (facingMode === 'user') {
-        ctx.save();
-        ctx.translate(canvas.width, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        ctx.restore();
-      } else {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    if (video && (video.videoWidth > 0 || video.readyState >= 1)) {
+      try {
+        if (facingMode === 'user') {
+          ctx.save();
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+        } else {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        }
+        capturedRealVideo = true;
+      } catch (drawErr) {
+        console.warn('Direct video draw error:', drawErr);
       }
-    } else {
-      // Fallback if camera stream is not feeding real pixels: render realistic workshop capture frame
-      const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-      grad.addColorStop(0, '#1e293b');
-      grad.addColorStop(1, '#0f172a');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
-      // Stylized silhouette
-      ctx.fillStyle = '#334155';
-      ctx.beginPath();
-      ctx.arc(canvas.width / 2, 190, 80, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(canvas.width / 2, 380, 160, 110, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = 'bold 16px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(activeEmp.employee_name || 'Staff Member', canvas.width / 2, 290);
-      ctx.font = '12px monospace';
-      ctx.fillText(`ID: ${activeEmp.employee_code}`, canvas.width / 2, 312);
+    if (!capturedRealVideo) {
+      console.warn('Camera video frame was not ready at capture moment');
+      return null;
     }
 
     // Embed IST authentication timestamp watermark
@@ -222,8 +263,8 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
     ctx.font = 'bold 11px monospace';
     ctx.fillText(`● PREMJI SECURE IST: ${timeNow}`, 16, canvas.height - 17);
 
-    // Fast JPEG compression at 0.70 quality
-    return canvas.toDataURL('image/jpeg', 0.70);
+    // Fast JPEG compression at 0.75 quality
+    return canvas.toDataURL('image/jpeg', 0.75);
   };
 
   // Execute Attendance Punch (<300ms end-to-end turnaround)
@@ -341,31 +382,59 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
             <div className="absolute inset-0 z-40 bg-white transition-opacity duration-150" />
           )}
 
-          {cameraError ? (
-            <div className="p-6 text-center text-white space-y-3 z-30">
-              <AlertTriangle className="mx-auto h-8 w-8 text-amber-400" />
-              <p className="text-xs text-slate-300 max-w-xs">{cameraError}</p>
-              <button
-                type="button"
-                onClick={initCamera}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 cursor-pointer"
-              >
-                <RefreshCw className="h-3 w-3" />
-                Retry Camera
-              </button>
+          {/* Hidden File Input for Direct Photo Capture / Fallback */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            capture="user"
+            onChange={handleFallbackFileSelect}
+            className="hidden"
+          />
+
+          {cameraError && !uploadedFallbackImage ? (
+            <div className="p-5 text-center text-white space-y-3 z-30">
+              <AlertTriangle className="mx-auto h-7 w-7 text-amber-400" />
+              <p className="text-xs text-slate-300 max-w-xs leading-relaxed">{cameraError}</p>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={initCamera}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-xl bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 cursor-pointer shadow-sm"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span>Enable Camera</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 cursor-pointer shadow-sm"
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  <span>Snap / Select Photo</span>
+                </button>
+              </div>
             </div>
           ) : (
             <>
-              {/* Live Video Feed */}
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className={`h-full w-full object-cover ${
-                  facingMode === 'user' ? 'scale-x-[-1]' : ''
-                }`}
-              />
+              {/* Either Live Video Feed OR Uploaded Fallback Photo */}
+              {uploadedFallbackImage ? (
+                <img
+                  src={uploadedFallbackImage}
+                  alt="Captured Frame"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`h-full w-full object-cover ${
+                    facingMode === 'user' ? 'scale-x-[-1]' : ''
+                  }`}
+                />
+              )}
 
               {/* Clean Oval Face Mask:
                   100% solid opaque dark overlay completely hiding everything outside of the oval.
@@ -395,21 +464,36 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
                 </svg>
               </div>
 
-              {/* Camera Controls Overlay (Flip button) */}
-              <button
-                type="button"
-                onClick={toggleCameraFacing}
-                className="absolute top-3 right-3 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-black/80 transition cursor-pointer"
-                title="Flip Camera (Front/Rear)"
-                aria-label="Flip Camera (Front/Rear)"
-              >
-                <RotateCw className="h-3.5 w-3.5" />
-              </button>
+              {/* Camera Controls Overlay (Flip button or Retake button) */}
+              {uploadedFallbackImage ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUploadedFallbackImage(null);
+                    initCamera();
+                  }}
+                  className="absolute top-3 right-3 z-30 flex items-center gap-1 rounded-full bg-slate-900/80 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur-md hover:bg-slate-900 transition cursor-pointer border border-white/20 shadow-md"
+                  title="Retake Photo"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  <span>Retake</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={toggleCameraFacing}
+                  className="absolute top-3 right-3 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-black/80 transition cursor-pointer"
+                  title="Flip Camera (Front/Rear)"
+                  aria-label="Flip Camera (Front/Rear)"
+                >
+                  <RotateCw className="h-3.5 w-3.5" />
+                </button>
+              )}
 
               {/* Status Watermark */}
               <div className="absolute bottom-2.5 left-2.5 z-30 rounded-lg bg-black/60 px-2 py-0.5 text-[9px] font-mono font-bold text-white/90 backdrop-blur-md flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
-                <span>Camera Ready</span>
+                <span>{uploadedFallbackImage ? 'Photo Ready' : 'Camera Ready'}</span>
               </div>
             </>
           )}

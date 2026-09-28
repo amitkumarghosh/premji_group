@@ -466,11 +466,12 @@ export async function createExpressApp() {
     }
   });
 
-  // Manual Attendance Create (Admin / Super Admin / TeamLeader)
+  // Manual Attendance Create (Admin / Super Admin / TeamLeader) with Multi-Employee & Existing Record Check
   app.post(['/api/attendance/manual-create', '/api/admin/attendance/manual-create'], requireAuth, requireRole(['Admin', 'Super Admin', 'TeamLeader']), async (req: AuthenticatedRequest, res: Response) => {
     try {
       const {
         attendance_date,
+        emp_codes,
         emp_code_of_thetechnician,
         name_of_technician,
         center_code,
@@ -478,19 +479,67 @@ export async function createExpressApp() {
         intermidiate_off_out_time,
         intermidiate_off_in_time,
         on_duty_out_time,
-        admin_remarks
+        admin_remarks,
+        check_only,
+        skip_existing
       } = req.body;
 
-      if (!attendance_date || !emp_code_of_thetechnician) {
-        return res.status(400).json({ error: 'Attendance date and Employee Code are required' });
+      // Extract target employee codes
+      let targetCodes: string[] = [];
+      if (Array.isArray(emp_codes) && emp_codes.length > 0) {
+        targetCodes = emp_codes.filter((c: any) => typeof c === 'string' && c.trim().length > 0);
+      } else if (emp_code_of_thetechnician) {
+        targetCodes = [emp_code_of_thetechnician];
       }
 
-      // Check if employee exists
-      const emp = await db.getEmployeeByCode(emp_code_of_thetechnician, false);
-      const techName = name_of_technician || emp?.employee_name || emp_code_of_thetechnician;
-      const techCenterCode = center_code || emp?.center_code || 'Unassigned';
-      const techCenterName = emp?.center_name || 'Unassigned';
-      const techCenterLocation = emp?.center_location || 'Main Center';
+      if (!attendance_date || targetCodes.length === 0) {
+        return res.status(400).json({ error: 'Attendance date and at least one Employee must be selected' });
+      }
+
+      // Check which employees ALREADY have attendance records on attendance_date
+      const existingEmployees: Array<{ emp_code: string; name: string; id: number }> = [];
+      const nonExistingCodes: string[] = [];
+
+      for (const code of targetCodes) {
+        const exist = await db.getTodayAttendance(code, attendance_date);
+        if (exist && (exist.on_duty_in_time || exist.on_duty_out_time || exist.intermidiate_off_out_time || exist.intermidiate_off_in_time)) {
+          existingEmployees.push({
+            emp_code: code,
+            name: exist.name_of_technician || code,
+            id: exist.id || 0
+          });
+        } else {
+          nonExistingCodes.push(code);
+        }
+      }
+
+      // If checking availability only
+      if (check_only) {
+        return res.json({
+          success: true,
+          has_existing: existingEmployees.length > 0,
+          existing_employees: existingEmployees,
+          new_employees_count: nonExistingCodes.length
+        });
+      }
+
+      // If any existing employees found and skip_existing is not requested
+      if (existingEmployees.length > 0 && !skip_existing) {
+        const namesList = existingEmployees.map(e => `${e.name} (${e.emp_code})`).join(', ');
+        return res.status(409).json({
+          success: false,
+          has_existing: true,
+          existing_employees: existingEmployees,
+          error: `Attendance record is already available for: ${namesList} on ${attendance_date}. You can edit it only.`
+        });
+      }
+
+      const codesToInsert = skip_existing ? nonExistingCodes : targetCodes;
+      if (codesToInsert.length === 0) {
+        return res.status(400).json({
+          error: 'All selected employees already have attendance records for this date. Use the Edit Attendance tab to update them.'
+        });
+      }
 
       // Format times to YYYY-MM-DD HH:mm:ss
       const formatTime = (t: string | undefined | null) => {
@@ -519,37 +568,44 @@ export async function createExpressApp() {
       const effectiveWork = calculateEffectiveHours(totalWork, totalBreak);
       const currentIstDateTime = getIstDateTimeString();
 
-      const payload: any = {
-        attendance_date,
-        emp_code_of_thetechnician,
-        name_of_technician: techName,
-        center_code: techCenterCode,
-        center_name: techCenterName,
-        center_location: techCenterLocation,
-        on_duty_in_time: inTime,
-        intermidiate_off_out_time: breakOutTime,
-        intermidiate_off_in_time: breakInTime,
-        on_duty_out_time: outTime,
-        total_working_hrs: totalWork,
-        total_break_hrs: totalBreak,
-        effective_working_hrs: effectiveWork,
-        all_innitial_time: inTime || currentIstDateTime,
-        last_edit_timestamp: currentIstDateTime,
-        last_edited_by: req.user!.employee_code,
-        admin_remarks: admin_remarks || 'Manual record added by Admin'
-      };
+      const createdList: string[] = [];
 
-      const success = await db.markAttendance(payload);
-      if (!success) {
-        return res.status(500).json({ error: 'Failed to create attendance record in database' });
+      for (const empCode of codesToInsert) {
+        const emp = await db.getEmployeeByCode(empCode, false);
+        const techName = (codesToInsert.length === 1 && name_of_technician) ? name_of_technician : (emp?.employee_name || empCode);
+        const techCenterCode = (codesToInsert.length === 1 && center_code) ? center_code : (emp?.center_code || 'Unassigned');
+        const techCenterName = emp?.center_name || 'Unassigned';
+        const techCenterLocation = emp?.center_location || 'Main Center';
+
+        const payload: any = {
+          attendance_date,
+          emp_code_of_thetechnician: empCode,
+          name_of_technician: techName,
+          center_code: techCenterCode,
+          center_name: techCenterName,
+          center_location: techCenterLocation,
+          on_duty_in_time: inTime,
+          intermidiate_off_out_time: breakOutTime,
+          intermidiate_off_in_time: breakInTime,
+          on_duty_out_time: outTime,
+          total_working_hrs: totalWork,
+          total_break_hrs: totalBreak,
+          effective_working_hrs: effectiveWork,
+          all_innitial_time: inTime || currentIstDateTime,
+          last_edit_timestamp: currentIstDateTime,
+          last_edited_by: req.user!.employee_code,
+          admin_remarks: admin_remarks || 'Manual record added by Admin'
+        };
+
+        await db.markAttendance(payload);
+        createdList.push(techName);
       }
-
-      const createdRecord = await db.getTodayAttendance(emp_code_of_thetechnician, attendance_date);
 
       return res.json({
         success: true,
-        message: `Attendance created successfully for ${techName} (${emp_code_of_thetechnician}) on ${attendance_date}`,
-        attendance: createdRecord || payload
+        message: `Attendance created successfully for ${createdList.length} employee(s) on ${attendance_date}!`,
+        created_count: createdList.length,
+        skipped_count: existingEmployees.length
       });
     } catch (err: any) {
       console.error('Manual attendance create error:', err);
