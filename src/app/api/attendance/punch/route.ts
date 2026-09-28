@@ -173,13 +173,15 @@ export async function POST(req: Request) {
     // Existing today's record lookup
     const existing = await db.getTodayAttendance(empCode, todayDateIST);
 
-    // Build payload according to the 9 core business fields
+    // Build payload according to the 9 core business fields with strict non-null guarantees
     const payload: any = {
       emp_code_of_thetechnician: empCode,
       name_of_technician: empDetails.employee_name,
+      center_name: existing?.center_name || empDetails.center_name || empDetails.center_code || 'Unassigned',
+      center_location: existing?.center_location || empDetails.center_location || 'Unassigned',
       attendance_date: todayDateIST,
-      last_edit_timestamp: currentIstDateTime, // Field 7: Audit trail
-      last_edited_by: actor                   // Field 8: Actor
+      last_edit_timestamp: currentIstDateTime, // Field 7: Audit trail (Guaranteed non-null)
+      last_edited_by: actor                   // Field 8: Actor (Guaranteed non-null)
     };
 
     if (admin_remarks) {
@@ -192,15 +194,15 @@ export async function POST(req: Request) {
       payload.on_duty_in_image = imageUrl;
 
       // Field 4 & 5: Populate branch/center name & location at morning On Duty In
-      payload.center_name = empDetails.center_name || 'Premji Operations Hub';
-      payload.center_location = empDetails.center_location || 'Chennai';
+      payload.center_name = empDetails.center_name || empDetails.center_code || 'Unassigned';
+      payload.center_location = empDetails.center_location || 'Unassigned';
 
       // Field 6: IMMUTABLE GROUND-TRUTH: Set ONLY ONCE when employee first checks in
       if (!existing || !existing.all_innitial_time) {
         payload.all_innitial_time = currentIstDateTime;
       }
 
-      // Initialize KPI hours
+      // Initialize KPI hours (Guaranteed non-null)
       payload.total_working_hrs = 0.00;
       payload.total_break_hrs = 0.00;
       payload.effective_working_hrs = 0.00;

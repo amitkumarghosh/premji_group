@@ -305,9 +305,9 @@ export async function createExpressApp() {
       const attPayload: any = {
         emp_code_of_thetechnician: empCode,
         name_of_technician: empName,
-        center_code: centerCode,
-        center_name: centerName,
-        center_location: centerLocation,
+        center_code: centerCode || 'Unassigned',
+        center_name: existing?.center_name || centerName || 'Unassigned',
+        center_location: existing?.center_location || centerLocation || 'Unassigned',
         attendance_date: istDateStr,
         last_edit_timestamp: currentIstDateTime,
         last_edited_by: req.user!.employee_code

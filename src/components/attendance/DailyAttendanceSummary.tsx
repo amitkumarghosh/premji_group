@@ -201,29 +201,34 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
                     : 'border-slate-200 bg-slate-50/60 opacity-60'
                 }`}
               >
-                {/* Image Container */}
-                <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-900">
-                  <img
-                    src={photoUrl}
-                    alt={cp.title}
-                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                    loading="lazy"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = FALLBACK_IMAGE_SVG;
-                    }}
-                  />
+                {/* Image Container with Vertical Portrait Oval Mask for Employee View */}
+                <div className="relative aspect-[3/4] w-full p-2 bg-slate-100 flex items-center justify-center">
+                  <div
+                    className="relative w-full h-full overflow-hidden shadow-inner bg-slate-900 border-2 border-sky-300"
+                    style={{ clipPath: 'ellipse(42% 48% at 50% 50%)' }}
+                  >
+                    <img
+                      src={photoUrl}
+                      alt={cp.title}
+                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                      loading="lazy"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = FALLBACK_IMAGE_SVG;
+                      }}
+                    />
 
-                  {/* Zoom Overlay Icon */}
-                  {hasPhoto && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 backdrop-blur-xs transition duration-200 group-hover:opacity-100">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-900 shadow-lg">
-                        <Maximize2 className="h-4 w-4" />
+                    {/* Zoom Overlay Icon */}
+                    {hasPhoto && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 backdrop-blur-xs transition duration-200 group-hover:opacity-100">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-900 shadow-lg">
+                          <Maximize2 className="h-4 w-4" />
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   {/* Status Badge */}
-                  <div className="absolute top-2 left-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-md">
+                  <div className="absolute top-3 left-3 flex items-center gap-1 rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-md shadow-xs">
                     <span>{cp.icon}</span>
                     <span>{cp.subtitle}</span>
                   </div>

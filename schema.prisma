@@ -10,14 +10,16 @@ generator client {
   provider = "prisma-client-js"
 }
 
-/// Core Attendance Model adhering to the 9 business fields and endless re-punching
+/// Core Attendance Model adhering strictly to guaranteed non-null fields & audit tracks
 model PreamjiAttendance {
-  id                         Int       @id @default(autoincrement())
+  id                         BigInt    @id @default(autoincrement())
+  attendance_date            DateTime  @db.Date
   emp_code_of_thetechnician  String    @db.VarChar(50)
   name_of_technician         String    @db.VarChar(100)
-  attendance_date            DateTime  @db.Date
-
-  // Standard Checkpoints Timestamps and Photo URLs
+  center_name                String    @default("Unassigned") @db.VarChar(100)
+  center_location            String    @default("Unassigned") @db.VarChar(150)
+  
+  // Punch Timestamps (Asia/Kolkata IST)
   on_duty_in_time            DateTime? @db.DateTime(0)
   on_duty_in_image           String?   @db.Text
   intermidiate_off_out_time  DateTime? @db.DateTime(0)
@@ -26,42 +28,22 @@ model PreamjiAttendance {
   intermidiate_off_in_image  String?   @db.Text
   on_duty_out_time           DateTime? @db.DateTime(0)
   on_duty_out_image          String?   @db.Text
-
-  // 1. Gross hours elapsed from on_duty_in_time to on_duty_out_time
-  total_working_hrs          Decimal?  @default(0.00) @db.Decimal(5, 2)
-
-  // 2. Elapsed break duration between intermidiate_off_out_time and intermidiate_off_in_time
-  total_break_hrs            Decimal?  @default(0.00) @db.Decimal(5, 2)
-
-  // 3. Net productive working hours after subtracting break time (Primary KPI)
-  effective_working_hrs      Decimal?  @default(0.00) @db.Decimal(5, 2)
-
-  // 4. Branch/Center name populated from employee_details at morning On Duty In
-  center_name                String?   @db.VarChar(100)
-
-  // 5. Branch physical city/location populated from employee_details at On Duty In
-  center_location            String?   @db.VarChar(150)
-
-  // 6. IMMUTABLE GROUND-TRUTH: Set ONLY ONCE when employee first checks in for the day (On Duty In)
-  all_innitial_time          DateTime? @db.DateTime(0)
-
-  // 7. AUDIT TRAIL: Updated to current server IST timestamp on EVERY transaction or re-punch
-  last_edit_timestamp        DateTime? @db.DateTime(0)
-
-  // 8. Actor performing the latest punch or modification (Employee Code / Admin Username)
-  last_edited_by             String?   @db.VarChar(50)
-
-  // 9. Administrative notes or justifications entered by Admin, Super Admin, or Team Lead
+  
+  // Calculated Working Metrics
+  total_working_hrs          Decimal?  @db.Decimal(5, 2)
+  total_break_hrs            Decimal   @default(0.00) @db.Decimal(5, 2)
+  effective_working_hrs      Decimal?  @db.Decimal(5, 2)
+  
+  // Audit & System Fields (Guaranteed Non-Null on Creation)
+  all_innitial_time          DateTime  @db.DateTime(0) // Immutable morning check-in anchor
+  last_edit_timestamp        DateTime  @db.DateTime(0) // Updated on EVERY action
+  last_edited_by             String    @db.VarChar(50)  // Employee / Admin ID who made change
   admin_remarks              String?   @db.Text
 
-  // System metadata
-  created_at                 DateTime  @default(now()) @db.DateTime(0)
-  updated_at                 DateTime  @updatedAt @db.DateTime(0)
-
-  @@unique([emp_code_of_thetechnician, attendance_date], name: "unique_emp_date")
-  @@index([attendance_date], name: "idx_attendance_date")
-  @@index([emp_code_of_thetechnician], name: "idx_emp_code")
-  @@index([center_name], name: "idx_center_name")
+  @@unique([attendance_date, emp_code_of_thetechnician], name: "unique_emp_date_attendance")
+  @@index([attendance_date])
+  @@index([emp_code_of_thetechnician])
+  @@index([center_name])
   @@map("preamji_attendance")
 }
 

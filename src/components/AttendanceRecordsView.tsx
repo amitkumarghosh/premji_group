@@ -455,79 +455,135 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                       </td>
 
                       {/* In Time */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
-                        <div className="font-mono font-bold text-emerald-700">
-                          {formatIstTimeDisplay(r.on_duty_in_time)}
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="font-mono font-bold text-emerald-700">
+                            {formatIstTimeDisplay(r.on_duty_in_time)}
+                          </span>
+                          {r.on_duty_in_image ? (
+                            <button
+                              type="button"
+                              onClick={() => onInspectImage({
+                                url: formatPhotoUrl(r.on_duty_in_image),
+                                title: `Shift In (Uncropped Environment) - ${r.name_of_technician} (${r.attendance_date})`
+                              })}
+                              className="group relative h-9 w-12 overflow-hidden rounded-md border border-slate-200 bg-slate-900 shadow-2xs hover:scale-110 hover:border-emerald-500 transition cursor-pointer"
+                              title="Click to inspect full uncropped surroundings"
+                            >
+                              <img
+                                src={formatPhotoUrl(r.on_duty_in_image)}
+                                alt="Shift In"
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                                onError={(e) => { (e.target as HTMLImageElement).src = FALLBACK_IMAGE_SVG; }}
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                <Eye className="h-3.5 w-3.5 text-white" />
+                              </div>
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-300 italic">No Photo</span>
+                          )}
                         </div>
-                        {r.on_duty_in_image && (
-                          <button
-                            type="button"
-                            onClick={() => onInspectImage({
-                              url: formatPhotoUrl(r.on_duty_in_image),
-                              title: `Shift In - ${r.name_of_technician} (${r.attendance_date})`
-                            })}
-                            className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-sky-600 hover:text-sky-800 cursor-pointer"
-                          >
-                            <Eye className="h-3 w-3" /> Photo
-                          </button>
-                        )}
                       </td>
 
                       {/* Break Out */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
-                        <div className="font-mono font-bold text-amber-700">
-                          {formatIstTimeDisplay(r.intermidiate_off_out_time)}
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="font-mono font-bold text-amber-700">
+                            {formatIstTimeDisplay(r.intermidiate_off_out_time)}
+                          </span>
+                          {r.intermidiate_off_out_image ? (
+                            <button
+                              type="button"
+                              onClick={() => onInspectImage({
+                                url: formatPhotoUrl(r.intermidiate_off_out_image),
+                                title: `Break Out (Uncropped Environment) - ${r.name_of_technician} (${r.attendance_date})`
+                              })}
+                              className="group relative h-9 w-12 overflow-hidden rounded-md border border-slate-200 bg-slate-900 shadow-2xs hover:scale-110 hover:border-amber-500 transition cursor-pointer"
+                              title="Click to inspect full uncropped surroundings"
+                            >
+                              <img
+                                src={formatPhotoUrl(r.intermidiate_off_out_image)}
+                                alt="Break Out"
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                                onError={(e) => { (e.target as HTMLImageElement).src = FALLBACK_IMAGE_SVG; }}
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                <Eye className="h-3.5 w-3.5 text-white" />
+                              </div>
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-300 italic">—</span>
+                          )}
                         </div>
-                        {r.intermidiate_off_out_image && (
-                          <button
-                            type="button"
-                            onClick={() => onInspectImage({
-                              url: formatPhotoUrl(r.intermidiate_off_out_image),
-                              title: `Break Out - ${r.name_of_technician} (${r.attendance_date})`
-                            })}
-                            className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 hover:text-amber-800 cursor-pointer"
-                          >
-                            <Eye className="h-3 w-3" /> Photo
-                          </button>
-                        )}
                       </td>
 
                       {/* Break In */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
-                        <div className="font-mono font-bold text-blue-700">
-                          {formatIstTimeDisplay(r.intermidiate_off_in_time)}
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="font-mono font-bold text-blue-700">
+                            {formatIstTimeDisplay(r.intermidiate_off_in_time)}
+                          </span>
+                          {r.intermidiate_off_in_image ? (
+                            <button
+                              type="button"
+                              onClick={() => onInspectImage({
+                                url: formatPhotoUrl(r.intermidiate_off_in_image),
+                                title: `Break In (Uncropped Environment) - ${r.name_of_technician} (${r.attendance_date})`
+                              })}
+                              className="group relative h-9 w-12 overflow-hidden rounded-md border border-slate-200 bg-slate-900 shadow-2xs hover:scale-110 hover:border-blue-500 transition cursor-pointer"
+                              title="Click to inspect full uncropped surroundings"
+                            >
+                              <img
+                                src={formatPhotoUrl(r.intermidiate_off_in_image)}
+                                alt="Break In"
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                                onError={(e) => { (e.target as HTMLImageElement).src = FALLBACK_IMAGE_SVG; }}
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                <Eye className="h-3.5 w-3.5 text-white" />
+                              </div>
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-300 italic">—</span>
+                          )}
                         </div>
-                        {r.intermidiate_off_in_image && (
-                          <button
-                            type="button"
-                            onClick={() => onInspectImage({
-                              url: formatPhotoUrl(r.intermidiate_off_in_image),
-                              title: `Break In - ${r.name_of_technician} (${r.attendance_date})`
-                            })}
-                            className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-blue-600 hover:text-blue-800 cursor-pointer"
-                          >
-                            <Eye className="h-3 w-3" /> Photo
-                          </button>
-                        )}
                       </td>
 
                       {/* Out Time */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
-                        <div className="font-mono font-bold text-purple-700">
-                          {formatIstTimeDisplay(r.on_duty_out_time)}
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="font-mono font-bold text-purple-700">
+                            {formatIstTimeDisplay(r.on_duty_out_time)}
+                          </span>
+                          {r.on_duty_out_image ? (
+                            <button
+                              type="button"
+                              onClick={() => onInspectImage({
+                                url: formatPhotoUrl(r.on_duty_out_image),
+                                title: `Shift Out (Uncropped Environment) - ${r.name_of_technician} (${r.attendance_date})`
+                              })}
+                              className="group relative h-9 w-12 overflow-hidden rounded-md border border-slate-200 bg-slate-900 shadow-2xs hover:scale-110 hover:border-purple-500 transition cursor-pointer"
+                              title="Click to inspect full uncropped surroundings"
+                            >
+                              <img
+                                src={formatPhotoUrl(r.on_duty_out_image)}
+                                alt="Shift Out"
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                                onError={(e) => { (e.target as HTMLImageElement).src = FALLBACK_IMAGE_SVG; }}
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                <Eye className="h-3.5 w-3.5 text-white" />
+                              </div>
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-300 italic">—</span>
+                          )}
                         </div>
-                        {r.on_duty_out_image && (
-                          <button
-                            type="button"
-                            onClick={() => onInspectImage({
-                              url: formatPhotoUrl(r.on_duty_out_image),
-                              title: `Shift Out - ${r.name_of_technician} (${r.attendance_date})`
-                            })}
-                            className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-purple-600 hover:text-purple-800 cursor-pointer"
-                          >
-                            <Eye className="h-3 w-3" /> Photo
-                          </button>
-                        )}
                       </td>
 
                       {/* Gross Hours */}

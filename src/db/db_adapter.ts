@@ -749,6 +749,32 @@ export const db = {
     const empCode = attendance.emp_code_of_thetechnician!;
     const nowIST = getIstDateTimeString();
 
+    // Mandatory Issue 1 resolution: Lookup employee_details for center_name and center_location
+    let resolvedCenterName = attendance.center_name;
+    let resolvedCenterLocation = attendance.center_location;
+    let resolvedTechName = attendance.name_of_technician;
+
+    try {
+      const emp = await db.getEmployeeByCode(empCode, false);
+      if (emp) {
+        if (!resolvedCenterName || resolvedCenterName === 'Unassigned') {
+          resolvedCenterName = emp.center_name || emp.center_code || 'Unassigned';
+        }
+        if (!resolvedCenterLocation || resolvedCenterLocation === 'Unassigned') {
+          resolvedCenterLocation = emp.center_location || 'Unassigned';
+        }
+        if (!resolvedTechName) {
+          resolvedTechName = emp.employee_name;
+        }
+      }
+    } catch {}
+
+    resolvedCenterName = resolvedCenterName || 'Unassigned';
+    resolvedCenterLocation = resolvedCenterLocation || 'Unassigned';
+    resolvedTechName = resolvedTechName || empCode;
+
+    const actingUser = attendance.last_edited_by || empCode;
+
     if (!useLocalDb && mysqlPool) {
       try {
         // Look up if existing record
@@ -761,7 +787,7 @@ export const db = {
 
         // Ground truth all_innitial_time logic: Set ONLY ONCE at morning check-in; NEVER overwritten
         let initialTimeVal = existing?.all_innitial_time;
-        if (!initialTimeVal && (attendance.all_innitial_time || attendance.on_duty_in_time)) {
+        if (!initialTimeVal) {
           initialTimeVal = toMysqlDatetime(attendance.all_innitial_time || attendance.on_duty_in_time, dateStr) || nowIST;
         }
 
@@ -790,11 +816,14 @@ export const db = {
           const values: any[] = [];
           const updateObj: any = {
             ...attendance,
+            name_of_technician: resolvedTechName,
+            center_name: resolvedCenterName,
+            center_location: resolvedCenterLocation,
             total_working_hrs: totalWork,
             total_break_hrs: totalBreak,
             effective_working_hrs: netEff,
             last_edit_timestamp: nowIST,
-            last_edited_by: attendance.last_edited_by || empCode
+            last_edited_by: actingUser
           };
 
           // NEVER overwrite all_innitial_time on an existing record that already has it
@@ -838,7 +867,8 @@ export const db = {
                 'on_duty_in_time', 'on_duty_in_image',
                 'intermidiate_off_out_time', 'intermidiate_off_out_image',
                 'intermidiate_off_in_time', 'intermidiate_off_in_image',
-                'on_duty_out_time', 'on_duty_out_image'
+                'on_duty_out_time', 'on_duty_out_image',
+                'center_name', 'last_edit_timestamp', 'last_edited_by'
               ].filter(k => updateObj[k] !== undefined);
               const safeVals = safeFields.map(k => updateObj[k]);
               safeVals.push(existing.id);
@@ -851,8 +881,8 @@ export const db = {
           }
           return true;
         } else {
-          // INSERT new record
-          const onDutyInTime = toMysqlDatetime(attendance.on_duty_in_time, dateStr);
+          // INSERT new record (Guaranteed Non-Null on Creation)
+          const onDutyInTime = toMysqlDatetime(attendance.on_duty_in_time, dateStr) || nowIST;
           const intermidiateOffOutTime = toMysqlDatetime(attendance.intermidiate_off_out_time, dateStr);
           const intermidiateOffInTime = toMysqlDatetime(attendance.intermidiate_off_in_time, dateStr);
           const onDutyOutTime = toMysqlDatetime(attendance.on_duty_out_time, dateStr);
@@ -868,10 +898,10 @@ export const db = {
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 empCode,
-                attendance.name_of_technician,
-                attendance.center_code || null,
-                attendance.center_name || null,
-                attendance.center_location || null,
+                resolvedTechName,
+                attendance.center_code || 'Unassigned',
+                resolvedCenterName,
+                resolvedCenterLocation,
                 dateStr,
                 onDutyInTime,
                 attendance.on_duty_in_image || null,
@@ -886,7 +916,7 @@ export const db = {
                 netEff,
                 initialTimeVal || onDutyInTime,
                 nowIST,
-                attendance.last_edited_by || empCode,
+                actingUser,
                 attendance.admin_remarks || null
               ]
             );
@@ -901,8 +931,8 @@ export const db = {
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 empCode,
-                attendance.name_of_technician,
-                attendance.center_name || null,
+                resolvedTechName,
+                resolvedCenterName,
                 dateStr,
                 onDutyInTime,
                 attendance.on_duty_in_image || null,
@@ -922,7 +952,7 @@ export const db = {
       }
     }
 
-    // Local JSON DB implementation with all 9 core fields
+    // Local JSON DB implementation with guaranteed non-null fields
     const store = readLocalDb();
     let index = store.preamji_attendance.findIndex(
       (a: any) => a.emp_code_of_thetechnician === empCode && a.attendance_date === dateStr
@@ -955,17 +985,20 @@ export const db = {
       store.preamji_attendance[index] = {
         ...existing,
         ...attendance,
+        name_of_technician: resolvedTechName,
+        center_name: resolvedCenterName,
+        center_location: resolvedCenterLocation,
         total_working_hrs: totalWork,
         total_break_hrs: totalBreak,
         effective_working_hrs: netEff,
         all_innitial_time: initialTime,
         last_edit_timestamp: nowIST,
-        last_edited_by: attendance.last_edited_by || empCode,
+        last_edited_by: actingUser,
         updated_at: nowIST
       };
     } else {
       const newId = store.preamji_attendance.length > 0 ? Math.max(...store.preamji_attendance.map((a: any) => a.id)) + 1 : 1;
-      const onDutyInTime = attendance.on_duty_in_time || null;
+      const onDutyInTime = attendance.on_duty_in_time || nowIST;
       const onDutyOutTime = attendance.on_duty_out_time || null;
       const breakOutTime = attendance.intermidiate_off_out_time || null;
       const breakInTime = attendance.intermidiate_off_in_time || null;
@@ -985,10 +1018,10 @@ export const db = {
       const newAtt: PremjiAttendance = {
         id: newId,
         emp_code_of_thetechnician: empCode,
-        name_of_technician: attendance.name_of_technician!,
-        center_code: attendance.center_code || null,
-        center_name: attendance.center_name || null,
-        center_location: attendance.center_location || 'Chennai',
+        name_of_technician: resolvedTechName,
+        center_code: attendance.center_code || 'Unassigned',
+        center_name: resolvedCenterName,
+        center_location: resolvedCenterLocation,
         attendance_date: dateStr,
         on_duty_in_time: onDutyInTime,
         on_duty_in_image: attendance.on_duty_in_image || null,
@@ -1003,7 +1036,7 @@ export const db = {
         effective_working_hrs: netEff,
         all_innitial_time: attendance.all_innitial_time || onDutyInTime || nowIST,
         last_edit_timestamp: nowIST,
-        last_edited_by: attendance.last_edited_by || empCode,
+        last_edited_by: actingUser,
         admin_remarks: attendance.admin_remarks || null,
         created_at: nowIST,
         updated_at: nowIST
