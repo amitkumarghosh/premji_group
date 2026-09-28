@@ -10,6 +10,15 @@ dotenv.config();
 import { initDatabase, db, isConnectionError } from './db/db_adapter.ts';
 import { sftpStorage } from './db/sftp_adapter.ts';
 import { jwtUtil, type JwtPayload } from './db/jwt.ts';
+import {
+  getIstNow,
+  getIstDateString,
+  getIstDateTimeString,
+  getIstTimeString,
+  calculateHours,
+  calculateEffectiveHours,
+  formatIstTimeDisplay
+} from './lib/ist-time.ts';
 
 // ES modules compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -208,31 +217,38 @@ export async function createExpressApp() {
 
   // ==================== ATTENDANCE API ====================
 
-  // Get current today status for standard checkpoint flows
-  app.get('/api/attendance/today', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  // ==================== ATTENDANCE API ====================
+
+  // Checkpoint Status & Punch API (Next.js route parity)
+  app.get('/api/attendance/punch', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const empCode = req.query.employee_code as string || req.user!.employee_code;
-      
-      // Ensure team leaders / admins can check other users, standard technicians only check themselves
-      if (empCode !== req.user!.employee_code && !['TeamLeader', 'Admin', 'Super Admin'].includes(req.user!.user_role)) {
-        return res.status(403).json({ error: 'Access denied: cannot view other attendance' });
-      }
+      const empCode = (req.query.employee_code as string) || req.user!.employee_code;
+      const todayIST = getIstDateString();
+      const attendance = await db.getTodayAttendance(empCode, todayIST);
+      const emp = await db.getEmployeeByCode(empCode, false);
 
-      // IST Today Date calculation (Asia/Kolkata timezone)
-      const istDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-      const att = await db.getTodayAttendance(empCode, istDateStr);
-
-      return res.json({ attendance: att, todayDate: istDateStr });
-    } catch (err) {
-      console.error('Error fetching today attendance:', err);
-      return res.status(500).json({ error: 'Failed to retrieve today\'s attendance status' });
+      return res.json({
+        success: true,
+        today_date: todayIST,
+        attendance: attendance || null,
+        employee: emp ? {
+          employee_code: emp.employee_code,
+          employee_name: emp.employee_name,
+          center_name: emp.center_name,
+          center_location: emp.center_location || 'Main Center',
+          user_role: emp.user_role
+        } : null
+      });
+    } catch (err: any) {
+      console.error('Error fetching punch status:', err);
+      return res.status(500).json({ error: 'Failed to retrieve punch status' });
     }
   });
 
-  // Checkpoint submission router (In, Break Out, Break In, Out)
-  app.post('/api/attendance/mark', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  // Next.js Route parity & standard punch handler
+  app.post(['/api/attendance/punch', '/api/attendance/mark'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { checkpoint, image, target_employee_code } = req.body;
+      const { checkpoint, image, target_employee_code, admin_remarks } = req.body;
       if (!checkpoint || !image) {
         return res.status(400).json({ error: 'Checkpoint type and image are required' });
       }
@@ -242,17 +258,17 @@ export async function createExpressApp() {
         return res.status(400).json({ error: 'Invalid checkpoint key' });
       }
 
-      // Allow Team Leader / Admins to sign attendance on behalf of another technician
       let empCode = req.user!.employee_code;
       let empName = req.user!.employee_name;
       let centerCode = req.user!.center_code;
       let centerName = req.user!.center_name;
+      let centerLocation = 'Main Center';
 
       if (target_employee_code && target_employee_code !== req.user!.employee_code) {
         if (!['TeamLeader', 'Admin', 'Super Admin'].includes(req.user!.user_role)) {
           return res.status(403).json({ error: 'Access denied: cannot mark attendance for team' });
         }
-        const targetEmp = await db.getEmployeeByCode(target_employee_code);
+        const targetEmp = await db.getEmployeeByCode(target_employee_code, false);
         if (!targetEmp) {
           return res.status(404).json({ error: 'Target employee not found' });
         }
@@ -260,55 +276,137 @@ export async function createExpressApp() {
         empName = targetEmp.employee_name;
         centerCode = targetEmp.center_code;
         centerName = targetEmp.center_name;
+        centerLocation = targetEmp.center_location || 'Main Center';
+      } else {
+        const myDetails = await db.getEmployeeByCode(empCode, false);
+        if (myDetails) {
+          centerLocation = myDetails.center_location || 'Main Center';
+        }
       }
 
-      // Timings in India standard time
-      const nowIST = new Date();
-      const istTimeStr = nowIST.toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Kolkata',
-        hour12: false,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-      const istDateStr = nowIST.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      // Timezone locking: Asia/Kolkata
+      const nowIST = getIstNow();
+      const currentIstDateTime = getIstDateTimeString(nowIST);
+      const istDateStr = getIstDateString(nowIST);
+      const istTimeStr = getIstTimeString(nowIST, '24h');
 
-      // Save image to sftp/local file storage
+      // Save image to storage
       const year = nowIST.getFullYear();
       const month = String(nowIST.getMonth() + 1).padStart(2, '0');
       const relativeFolder = `attendance/${year}/${month}`;
-      const fileName = `${empCode}_${checkpoint}_${Date.now()}.webp`;
+      const fileName = `${empCode}_${checkpoint}_${Date.now()}.jpg`;
 
       const savedVirtualPath = await sftpStorage.uploadImage(relativeFolder, fileName, image);
+      const imageUrl = `/api/media/view?path=${savedVirtualPath}`;
 
-      // Create payload dynamically
+      // Existing today record lookup
+      const existing = await db.getTodayAttendance(empCode, istDateStr);
+
       const attPayload: any = {
         emp_code_of_thetechnician: empCode,
         name_of_technician: empName,
         center_code: centerCode,
         center_name: centerName,
+        center_location: centerLocation,
         attendance_date: istDateStr,
+        last_edit_timestamp: currentIstDateTime,
+        last_edited_by: req.user!.employee_code
       };
 
-      // Set individual checkpoint variables
-      attPayload[`${checkpoint}_time`] = istTimeStr;
-      attPayload[`${checkpoint}_image`] = `/api/media/view?path=${savedVirtualPath}`;
+      if (admin_remarks) {
+        attPayload.admin_remarks = admin_remarks;
+      }
+
+      if (checkpoint === 'on_duty_in') {
+        attPayload.on_duty_in_time = currentIstDateTime;
+        attPayload.on_duty_in_image = imageUrl;
+        if (!existing || !existing.all_innitial_time) {
+          attPayload.all_innitial_time = currentIstDateTime;
+        }
+        attPayload.total_working_hrs = 0.00;
+        attPayload.total_break_hrs = 0.00;
+        attPayload.effective_working_hrs = 0.00;
+      } else if (checkpoint === 'intermidiate_off_out') {
+        attPayload.intermidiate_off_out_time = currentIstDateTime;
+        attPayload.intermidiate_off_out_image = imageUrl;
+      } else if (checkpoint === 'intermidiate_off_in') {
+        attPayload.intermidiate_off_in_time = currentIstDateTime;
+        attPayload.intermidiate_off_in_image = imageUrl;
+        if (existing?.intermidiate_off_out_time) {
+          attPayload.total_break_hrs = calculateHours(existing.intermidiate_off_out_time, currentIstDateTime, istDateStr);
+        }
+        if (existing?.on_duty_out_time && existing?.on_duty_in_time) {
+          const totalWork = calculateHours(existing.on_duty_in_time, existing.on_duty_out_time, istDateStr);
+          attPayload.total_working_hrs = totalWork;
+          attPayload.effective_working_hrs = calculateEffectiveHours(totalWork, attPayload.total_break_hrs || 0);
+        }
+      } else if (checkpoint === 'on_duty_out') {
+        // Endless re-punching: overwrite out time & photo, recalculate hours, keep all_innitial_time
+        attPayload.on_duty_out_time = currentIstDateTime;
+        attPayload.on_duty_out_image = imageUrl;
+
+        const inTime = existing?.on_duty_in_time || currentIstDateTime;
+        const totalWork = calculateHours(inTime, currentIstDateTime, istDateStr);
+        attPayload.total_working_hrs = totalWork;
+
+        let breakDuration = 0.00;
+        if (existing?.intermidiate_off_out_time && existing?.intermidiate_off_in_time) {
+          breakDuration = calculateHours(existing.intermidiate_off_out_time, existing.intermidiate_off_in_time, istDateStr);
+        } else if (existing?.total_break_hrs) {
+          breakDuration = Number(existing.total_break_hrs);
+        }
+        attPayload.total_break_hrs = breakDuration;
+        attPayload.effective_working_hrs = calculateEffectiveHours(totalWork, breakDuration);
+      }
 
       const success = await db.markAttendance(attPayload);
       if (!success) {
         return res.status(500).json({ error: 'Failed to write attendance log to database' });
       }
 
+      const updatedRecord = await db.getTodayAttendance(empCode, istDateStr);
+      const displayTime = formatIstTimeDisplay(currentIstDateTime);
+
+      let msg = `Attendance checkpoint '${checkpoint}' logged at ${displayTime} IST`;
+      if (checkpoint === 'on_duty_out' && existing?.on_duty_out_time) {
+        msg = `🔄 On Duty Out updated at ${displayTime} IST. Effective: ${updatedRecord?.effective_working_hrs || '0.00'} hrs.`;
+      }
+
       return res.json({
         success: true,
-        message: `Attendance checkpoint '${checkpoint}' logged at ${istTimeStr}`,
+        message: msg,
+        checkpoint,
         time: istTimeStr,
         date: istDateStr,
-        imagePath: attPayload[`${checkpoint}_image`]
+        display_time: displayTime,
+        attendance: updatedRecord,
+        metrics: {
+          total_working_hrs: updatedRecord?.total_working_hrs ?? 0.00,
+          total_break_hrs: updatedRecord?.total_break_hrs ?? 0.00,
+          effective_working_hrs: updatedRecord?.effective_working_hrs ?? 0.00
+        }
       });
     } catch (err: any) {
       console.error('Error marking attendance:', err);
       return res.status(500).json({ error: 'Failed to record attendance' });
+    }
+  });
+
+  // Get current today status for standard checkpoint flows
+  app.get('/api/attendance/today', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const empCode = req.query.employee_code as string || req.user!.employee_code;
+      if (empCode !== req.user!.employee_code && !['TeamLeader', 'Admin', 'Super Admin'].includes(req.user!.user_role)) {
+        return res.status(403).json({ error: 'Access denied: cannot view other attendance' });
+      }
+
+      const istDateStr = getIstDateString();
+      const att = await db.getTodayAttendance(empCode, istDateStr);
+
+      return res.json({ attendance: att, todayDate: istDateStr });
+    } catch (err) {
+      console.error('Error fetching today attendance:', err);
+      return res.status(500).json({ error: 'Failed to retrieve today\'s attendance status' });
     }
   });
 
@@ -324,19 +422,29 @@ export async function createExpressApp() {
     }
   });
 
-  // Admin and Super Admin Master Attendance Report
-  app.get('/api/attendance/admin-report', requireAuth, requireRole(['Admin', 'Super Admin']), async (req: AuthenticatedRequest, res: Response) => {
+  // Next.js Route parity & Aggregated Admin Attendance Summary
+  app.get(['/api/admin/attendance/summary', '/api/attendance/admin-report'], requireAuth, requireRole(['Admin', 'Super Admin', 'TeamLeader']), async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { start_date, end_date, center_code, employee_code } = req.query;
+      const { start_date, end_date, startDate, endDate, center_code, centerCode, employee_code, employeeCode, search } = req.query;
       
-      const records = await db.getAttendanceAdminReport({
-        startDate: start_date as string,
-        endDate: end_date as string,
-        centerCode: center_code as string,
-        employeeCode: employee_code as string
+      let filterCenterCode = (centerCode || center_code) as string || '';
+      if (req.user!.user_role === 'TeamLeader' && req.user!.center_code) {
+        filterCenterCode = req.user!.center_code;
+      }
+
+      const report = await db.getAttendanceSummaryReport({
+        startDate: (startDate || start_date) as string,
+        endDate: (endDate || end_date) as string,
+        centerCode: filterCenterCode,
+        employeeCode: (employeeCode || employee_code) as string,
+        search: search as string
       });
 
-      return res.json({ records });
+      return res.json({
+        success: true,
+        summary: report.summary,
+        records: report.records
+      });
     } catch (err) {
       console.error('Admin report error:', err);
       return res.status(500).json({ error: 'Failed to load master attendance report' });

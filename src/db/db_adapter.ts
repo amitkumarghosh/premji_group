@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
+import { calculateHours, calculateEffectiveHours, getIstDateTimeString } from '../lib/ist-time.ts';
 
 // Define DB Schemas matching production MySQL database
 export interface EmployeeDetails {
@@ -11,6 +12,7 @@ export interface EmployeeDetails {
   user_role: 'Technician' | 'Accounts' | 'Engineer' | 'TeamLeader' | 'Admin' | 'Super Admin';
   center_code: string | null;
   center_name: string | null;
+  center_location?: string | null;
   user_details?: string | null;
   employee_doj?: string | null;
   employee_status: 'Active' | 'Inactive' | '1' | '0';
@@ -22,17 +24,26 @@ export interface PremjiAttendance {
   id?: number;
   emp_code_of_thetechnician: string;
   name_of_technician: string;
-  center_code: string | null;
-  center_name: string | null;
+  center_code?: string | null;
+  center_name?: string | null;
+  center_location?: string | null;
   attendance_date: string; // YYYY-MM-DD
-  on_duty_in_time: string | null; // HH:MM:SS
-  on_duty_in_image: string | null;
-  intermidiate_off_out_time: string | null;
-  intermidiate_off_out_image: string | null;
-  intermidiate_off_in_time: string | null;
-  intermidiate_off_in_image: string | null;
-  on_duty_out_time: string | null;
-  on_duty_out_image: string | null;
+  on_duty_in_time?: string | null; // HH:MM:SS or YYYY-MM-DD HH:MM:SS
+  on_duty_in_image?: string | null;
+  intermidiate_off_out_time?: string | null;
+  intermidiate_off_out_image?: string | null;
+  intermidiate_off_in_time?: string | null;
+  intermidiate_off_in_image?: string | null;
+  on_duty_out_time?: string | null;
+  on_duty_out_image?: string | null;
+  // 9 Core Business Fields
+  total_working_hrs?: number | string | null;
+  total_break_hrs?: number | string | null;
+  effective_working_hrs?: number | string | null;
+  all_innitial_time?: string | null;
+  last_edit_timestamp?: string | null;
+  last_edited_by?: string | null;
+  admin_remarks?: string | null;
   created_at?: string | Date;
   updated_at?: string | Date;
 }
@@ -257,7 +268,31 @@ export async function initDatabase() {
       console.log('✅ Connected to Production MySQL Database successfully!');
       try {
         const [cols]: any = await conn.execute('DESCRIBE preamji_attendance');
-        attendanceTableHasCenterCode = cols.some((c: any) => c.Field === 'center_code');
+        const existingColNames = new Set(cols.map((c: any) => c.Field));
+        attendanceTableHasCenterCode = existingColNames.has('center_code');
+
+        const desiredCols: { name: string; type: string }[] = [
+          { name: 'total_working_hrs', type: 'DECIMAL(5,2) DEFAULT 0.00' },
+          { name: 'total_break_hrs', type: 'DECIMAL(5,2) DEFAULT 0.00' },
+          { name: 'effective_working_hrs', type: 'DECIMAL(5,2) DEFAULT 0.00' },
+          { name: 'center_name', type: 'VARCHAR(100)' },
+          { name: 'center_location', type: 'VARCHAR(150)' },
+          { name: 'all_innitial_time', type: 'DATETIME' },
+          { name: 'last_edit_timestamp', type: 'DATETIME' },
+          { name: 'last_edited_by', type: 'VARCHAR(50)' },
+          { name: 'admin_remarks', type: 'TEXT' }
+        ];
+
+        for (const col of desiredCols) {
+          if (!existingColNames.has(col.name)) {
+            try {
+              await conn.execute(`ALTER TABLE preamji_attendance ADD COLUMN ${col.name} ${col.type}`);
+              console.log(`✅ Auto-verified column ${col.name} on preamji_attendance`);
+            } catch (alterErr) {
+              console.warn(`Note: Could not alter preamji_attendance for ${col.name}:`, (alterErr as any)?.message);
+            }
+          }
+        }
       } catch (colErr) {
         attendanceTableHasCenterCode = false;
       }
@@ -712,61 +747,161 @@ export const db = {
   async markAttendance(attendance: Partial<PremjiAttendance>): Promise<boolean> {
     const dateStr = attendance.attendance_date!;
     const empCode = attendance.emp_code_of_thetechnician!;
+    const nowIST = getIstDateTimeString();
 
     if (!useLocalDb && mysqlPool) {
-      // Look up if existing record
-      const [rows]: any = await executeWithRetry(
-        'SELECT id FROM preamji_attendance WHERE emp_code_of_thetechnician = ? AND attendance_date = ? LIMIT 1',
-        [empCode, dateStr]
-      );
-
-      if (rows.length > 0) {
-        const fields: string[] = [];
-        const values: any[] = [];
-        const keys = [
-          'on_duty_in_time', 'on_duty_in_image',
-          'intermidiate_off_out_time', 'intermidiate_off_out_image',
-          'intermidiate_off_in_time', 'intermidiate_off_in_image',
-          'on_duty_out_time', 'on_duty_out_image'
-        ];
-
-        keys.forEach(key => {
-          if ((attendance as any)[key] !== undefined) {
-            fields.push(`${key} = ?`);
-            let val = (attendance as any)[key];
-            if (key.endsWith('_time') && val) {
-              val = toMysqlDatetime(val, dateStr);
-            }
-            values.push(val);
-          }
-        });
-
-        if (fields.length === 0) return true;
-        values.push(rows[0].id);
-
-        const [result]: any = await mysqlPool.execute(
-          `UPDATE preamji_attendance SET ${fields.join(', ')} WHERE id = ?`,
-          values
+      try {
+        // Look up if existing record
+        const [rows]: any = await executeWithRetry(
+          'SELECT * FROM preamji_attendance WHERE emp_code_of_thetechnician = ? AND attendance_date = ? LIMIT 1',
+          [empCode, dateStr]
         );
-        return result.affectedRows > 0;
-      } else {
-        const onDutyInTime = toMysqlDatetime(attendance.on_duty_in_time, dateStr);
-        const intermidiateOffOutTime = toMysqlDatetime(attendance.intermidiate_off_out_time, dateStr);
-        const intermidiateOffInTime = toMysqlDatetime(attendance.intermidiate_off_in_time, dateStr);
-        const onDutyOutTime = toMysqlDatetime(attendance.on_duty_out_time, dateStr);
 
-        if (attendanceTableHasCenterCode) {
+        const existing = rows[0] || null;
+
+        // Ground truth all_innitial_time logic: Set ONLY ONCE at morning check-in; NEVER overwritten
+        let initialTimeVal = existing?.all_innitial_time;
+        if (!initialTimeVal && (attendance.all_innitial_time || attendance.on_duty_in_time)) {
+          initialTimeVal = toMysqlDatetime(attendance.all_innitial_time || attendance.on_duty_in_time, dateStr) || nowIST;
+        }
+
+        // Recalculate hours if on_duty_out is updated
+        const effectiveInTime = attendance.on_duty_in_time ? toMysqlDatetime(attendance.on_duty_in_time, dateStr) : existing?.on_duty_in_time;
+        const effectiveBreakOut = attendance.intermidiate_off_out_time ? toMysqlDatetime(attendance.intermidiate_off_out_time, dateStr) : existing?.intermidiate_off_out_time;
+        const effectiveBreakIn = attendance.intermidiate_off_in_time ? toMysqlDatetime(attendance.intermidiate_off_in_time, dateStr) : existing?.intermidiate_off_in_time;
+        const effectiveOutTime = attendance.on_duty_out_time ? toMysqlDatetime(attendance.on_duty_out_time, dateStr) : existing?.on_duty_out_time;
+
+        let totalBreak = attendance.total_break_hrs !== undefined ? Number(attendance.total_break_hrs) : Number(existing?.total_break_hrs || 0);
+        if (effectiveBreakOut && effectiveBreakIn && attendance.total_break_hrs === undefined) {
+          totalBreak = calculateHours(effectiveBreakOut, effectiveBreakIn, dateStr);
+        }
+
+        let totalWork = attendance.total_working_hrs !== undefined ? Number(attendance.total_working_hrs) : Number(existing?.total_working_hrs || 0);
+        let netEff = attendance.effective_working_hrs !== undefined ? Number(attendance.effective_working_hrs) : Number(existing?.effective_working_hrs || 0);
+
+        if (effectiveInTime && effectiveOutTime) {
+          totalWork = calculateHours(effectiveInTime, effectiveOutTime, dateStr);
+          netEff = calculateEffectiveHours(totalWork, totalBreak);
+        }
+
+        if (existing) {
+          // UPDATE existing record
+          const fields: string[] = [];
+          const values: any[] = [];
+          const updateObj: any = {
+            ...attendance,
+            total_working_hrs: totalWork,
+            total_break_hrs: totalBreak,
+            effective_working_hrs: netEff,
+            last_edit_timestamp: nowIST,
+            last_edited_by: attendance.last_edited_by || empCode
+          };
+
+          // NEVER overwrite all_innitial_time on an existing record that already has it
+          if (!existing.all_innitial_time && initialTimeVal) {
+            updateObj.all_innitial_time = initialTimeVal;
+          }
+
+          const allowedKeys = [
+            'on_duty_in_time', 'on_duty_in_image',
+            'intermidiate_off_out_time', 'intermidiate_off_out_image',
+            'intermidiate_off_in_time', 'intermidiate_off_in_image',
+            'on_duty_out_time', 'on_duty_out_image',
+            'total_working_hrs', 'total_break_hrs', 'effective_working_hrs',
+            'center_name', 'center_location', 'center_code',
+            'all_innitial_time', 'last_edit_timestamp', 'last_edited_by', 'admin_remarks'
+          ];
+
+          for (const key of allowedKeys) {
+            if (updateObj[key] !== undefined) {
+              fields.push(`${key} = ?`);
+              let val = updateObj[key];
+              if (key.endsWith('_time') || key === 'last_edit_timestamp') {
+                val = toMysqlDatetime(val, dateStr);
+              }
+              values.push(val);
+            }
+          }
+
+          if (fields.length > 0) {
+            values.push(existing.id);
+            try {
+              const [result]: any = await executeWithRetry(
+                `UPDATE preamji_attendance SET ${fields.join(', ')} WHERE id = ?`,
+                values
+              );
+              return result.affectedRows > 0;
+            } catch (updateErr: any) {
+              console.warn('MySQL update failed with full fields, attempting safe update:', updateErr?.message);
+              // Fallback to core columns if some columns are missing
+              const safeFields = [
+                'on_duty_in_time', 'on_duty_in_image',
+                'intermidiate_off_out_time', 'intermidiate_off_out_image',
+                'intermidiate_off_in_time', 'intermidiate_off_in_image',
+                'on_duty_out_time', 'on_duty_out_image'
+              ].filter(k => updateObj[k] !== undefined);
+              const safeVals = safeFields.map(k => updateObj[k]);
+              safeVals.push(existing.id);
+              const [res2]: any = await executeWithRetry(
+                `UPDATE preamji_attendance SET ${safeFields.map(f => `${f} = ?`).join(', ')} WHERE id = ?`,
+                safeVals
+              );
+              return res2.affectedRows > 0;
+            }
+          }
+          return true;
+        } else {
+          // INSERT new record
+          const onDutyInTime = toMysqlDatetime(attendance.on_duty_in_time, dateStr);
+          const intermidiateOffOutTime = toMysqlDatetime(attendance.intermidiate_off_out_time, dateStr);
+          const intermidiateOffInTime = toMysqlDatetime(attendance.intermidiate_off_in_time, dateStr);
+          const onDutyOutTime = toMysqlDatetime(attendance.on_duty_out_time, dateStr);
+
           try {
-            const [result]: any = await mysqlPool.execute(
+            const [result]: any = await executeWithRetry(
               `INSERT INTO preamji_attendance 
-              (emp_code_of_thetechnician, name_of_technician, center_code, center_name, attendance_date,
+              (emp_code_of_thetechnician, name_of_technician, center_code, center_name, center_location, attendance_date,
                on_duty_in_time, on_duty_in_image, intermidiate_off_out_time, intermidiate_off_out_image,
-               intermidiate_off_in_time, intermidiate_off_in_image, on_duty_out_time, on_duty_out_image)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               intermidiate_off_in_time, intermidiate_off_in_image, on_duty_out_time, on_duty_out_image,
+               total_working_hrs, total_break_hrs, effective_working_hrs, all_innitial_time,
+               last_edit_timestamp, last_edited_by, admin_remarks)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 empCode,
                 attendance.name_of_technician,
                 attendance.center_code || null,
+                attendance.center_name || null,
+                attendance.center_location || null,
+                dateStr,
+                onDutyInTime,
+                attendance.on_duty_in_image || null,
+                intermidiateOffOutTime,
+                attendance.intermidiate_off_out_image || null,
+                intermidiateOffInTime,
+                attendance.intermidiate_off_in_image || null,
+                onDutyOutTime,
+                attendance.on_duty_out_image || null,
+                totalWork,
+                totalBreak,
+                netEff,
+                initialTimeVal || onDutyInTime,
+                nowIST,
+                attendance.last_edited_by || empCode,
+                attendance.admin_remarks || null
+              ]
+            );
+            return result.insertId > 0;
+          } catch (insertErr: any) {
+            console.warn('Full insert failed, falling back to standard columns:', insertErr?.message);
+            const [fallbackResult]: any = await executeWithRetry(
+              `INSERT INTO preamji_attendance 
+              (emp_code_of_thetechnician, name_of_technician, center_name, attendance_date,
+               on_duty_in_time, on_duty_in_image, intermidiate_off_out_time, intermidiate_off_out_image,
+               intermidiate_off_in_time, intermidiate_off_in_image, on_duty_out_time, on_duty_out_image)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                empCode,
+                attendance.name_of_technician,
                 attendance.center_name || null,
                 dateStr,
                 onDutyInTime,
@@ -779,75 +914,249 @@ export const db = {
                 attendance.on_duty_out_image || null
               ]
             );
-            return result.insertId > 0;
-          } catch (e: any) {
-            if (e.code === 'ER_BAD_FIELD_ERROR') {
-              attendanceTableHasCenterCode = false;
-            } else {
-              throw e;
-            }
+            return fallbackResult.insertId > 0;
           }
         }
-
-        const [result]: any = await mysqlPool.execute(
-          `INSERT INTO preamji_attendance 
-          (emp_code_of_thetechnician, name_of_technician, attendance_date,
-           on_duty_in_time, on_duty_in_image, intermidiate_off_out_time, intermidiate_off_out_image,
-           intermidiate_off_in_time, intermidiate_off_in_image, on_duty_out_time, on_duty_out_image)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            empCode,
-            attendance.name_of_technician,
-            dateStr,
-            onDutyInTime,
-            attendance.on_duty_in_image || null,
-            intermidiateOffOutTime,
-            attendance.intermidiate_off_out_image || null,
-            intermidiateOffInTime,
-            attendance.intermidiate_off_in_image || null,
-            onDutyOutTime,
-            attendance.on_duty_out_image || null
-          ]
-        );
-        return result.insertId > 0;
+      } catch (err: any) {
+        console.warn('⚠️ MySQL markAttendance error, syncing with local DB:', err?.message || err);
       }
-    } else {
-      const store = readLocalDb();
-      let index = store.preamji_attendance.findIndex(
-        (a: any) => a.emp_code_of_thetechnician === empCode && a.attendance_date === dateStr
-      );
-
-      if (index !== -1) {
-        store.preamji_attendance[index] = {
-          ...store.preamji_attendance[index],
-          ...attendance,
-          updated_at: new Date().toISOString()
-        };
-      } else {
-        const newId = store.preamji_attendance.length > 0 ? Math.max(...store.preamji_attendance.map((a: any) => a.id)) + 1 : 1;
-        const newAtt: PremjiAttendance = {
-          id: newId,
-          emp_code_of_thetechnician: empCode,
-          name_of_technician: attendance.name_of_technician!,
-          center_code: attendance.center_code || null,
-          center_name: attendance.center_name || null,
-          attendance_date: dateStr,
-          on_duty_in_time: attendance.on_duty_in_time || null,
-          on_duty_in_image: attendance.on_duty_in_image || null,
-          intermidiate_off_out_time: attendance.intermidiate_off_out_time || null,
-          intermidiate_off_out_image: attendance.intermidiate_off_out_image || null,
-          intermidiate_off_in_time: attendance.intermidiate_off_in_time || null,
-          intermidiate_off_in_image: attendance.intermidiate_off_in_image || null,
-          on_duty_out_time: attendance.on_duty_out_time || null,
-          on_duty_out_image: attendance.on_duty_out_image || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        store.preamji_attendance.push(newAtt);
-      }
-      writeLocalDb(store);
-      return true;
     }
+
+    // Local JSON DB implementation with all 9 core fields
+    const store = readLocalDb();
+    let index = store.preamji_attendance.findIndex(
+      (a: any) => a.emp_code_of_thetechnician === empCode && a.attendance_date === dateStr
+    );
+
+    if (index !== -1) {
+      const existing = store.preamji_attendance[index];
+
+      // Ground truth all_innitial_time: Set ONLY ONCE; NEVER overwritten
+      const initialTime = existing.all_innitial_time || attendance.all_innitial_time || attendance.on_duty_in_time || nowIST;
+
+      const effIn = attendance.on_duty_in_time || existing.on_duty_in_time;
+      const effBreakOut = attendance.intermidiate_off_out_time || existing.intermidiate_off_out_time;
+      const effBreakIn = attendance.intermidiate_off_in_time || existing.intermidiate_off_in_time;
+      const effOut = attendance.on_duty_out_time || existing.on_duty_out_time;
+
+      let totalBreak = attendance.total_break_hrs !== undefined ? Number(attendance.total_break_hrs) : Number(existing.total_break_hrs || 0);
+      if (effBreakOut && effBreakIn && attendance.total_break_hrs === undefined) {
+        totalBreak = calculateHours(effBreakOut, effBreakIn, dateStr);
+      }
+
+      let totalWork = attendance.total_working_hrs !== undefined ? Number(attendance.total_working_hrs) : Number(existing.total_working_hrs || 0);
+      let netEff = attendance.effective_working_hrs !== undefined ? Number(attendance.effective_working_hrs) : Number(existing.effective_working_hrs || 0);
+
+      if (effIn && effOut) {
+        totalWork = calculateHours(effIn, effOut, dateStr);
+        netEff = calculateEffectiveHours(totalWork, totalBreak);
+      }
+
+      store.preamji_attendance[index] = {
+        ...existing,
+        ...attendance,
+        total_working_hrs: totalWork,
+        total_break_hrs: totalBreak,
+        effective_working_hrs: netEff,
+        all_innitial_time: initialTime,
+        last_edit_timestamp: nowIST,
+        last_edited_by: attendance.last_edited_by || empCode,
+        updated_at: nowIST
+      };
+    } else {
+      const newId = store.preamji_attendance.length > 0 ? Math.max(...store.preamji_attendance.map((a: any) => a.id)) + 1 : 1;
+      const onDutyInTime = attendance.on_duty_in_time || null;
+      const onDutyOutTime = attendance.on_duty_out_time || null;
+      const breakOutTime = attendance.intermidiate_off_out_time || null;
+      const breakInTime = attendance.intermidiate_off_in_time || null;
+
+      let totalBreak = Number(attendance.total_break_hrs || 0);
+      if (breakOutTime && breakInTime && !totalBreak) {
+        totalBreak = calculateHours(breakOutTime, breakInTime, dateStr);
+      }
+
+      let totalWork = Number(attendance.total_working_hrs || 0);
+      let netEff = Number(attendance.effective_working_hrs || 0);
+      if (onDutyInTime && onDutyOutTime) {
+        totalWork = calculateHours(onDutyInTime, onDutyOutTime, dateStr);
+        netEff = calculateEffectiveHours(totalWork, totalBreak);
+      }
+
+      const newAtt: PremjiAttendance = {
+        id: newId,
+        emp_code_of_thetechnician: empCode,
+        name_of_technician: attendance.name_of_technician!,
+        center_code: attendance.center_code || null,
+        center_name: attendance.center_name || null,
+        center_location: attendance.center_location || 'Chennai',
+        attendance_date: dateStr,
+        on_duty_in_time: onDutyInTime,
+        on_duty_in_image: attendance.on_duty_in_image || null,
+        intermidiate_off_out_time: breakOutTime,
+        intermidiate_off_out_image: attendance.intermidiate_off_out_image || null,
+        intermidiate_off_in_time: breakInTime,
+        intermidiate_off_in_image: attendance.intermidiate_off_in_image || null,
+        on_duty_out_time: onDutyOutTime,
+        on_duty_out_image: attendance.on_duty_out_image || null,
+        total_working_hrs: totalWork,
+        total_break_hrs: totalBreak,
+        effective_working_hrs: netEff,
+        all_innitial_time: attendance.all_innitial_time || onDutyInTime || nowIST,
+        last_edit_timestamp: nowIST,
+        last_edited_by: attendance.last_edited_by || empCode,
+        admin_remarks: attendance.admin_remarks || null,
+        created_at: nowIST,
+        updated_at: nowIST
+      };
+      store.preamji_attendance.push(newAtt);
+    }
+    writeLocalDb(store);
+    return true;
+  },
+
+  async getAttendanceSummaryReport(filters: {
+    startDate?: string;
+    endDate?: string;
+    centerCode?: string;
+    centerName?: string;
+    employeeCode?: string;
+    search?: string;
+  }): Promise<{ summary: any; records: PremjiAttendance[] }> {
+    if (!useLocalDb && mysqlPool) {
+      try {
+        let whereClause = ' WHERE 1=1';
+        const params: any[] = [];
+
+        if (filters.startDate) {
+          whereClause += ' AND a.attendance_date >= ?';
+          params.push(filters.startDate);
+        }
+        if (filters.endDate) {
+          whereClause += ' AND a.attendance_date <= ?';
+          params.push(filters.endDate);
+        }
+        if (filters.centerCode) {
+          whereClause += ' AND (e.center_code = ? OR a.center_code = ?)';
+          params.push(filters.centerCode, filters.centerCode);
+        }
+        if (filters.centerName) {
+          whereClause += ' AND a.center_name = ?';
+          params.push(filters.centerName);
+        }
+        if (filters.employeeCode) {
+          whereClause += ' AND a.emp_code_of_thetechnician = ?';
+          params.push(filters.employeeCode);
+        }
+        if (filters.search) {
+          whereClause += ' AND (a.emp_code_of_thetechnician LIKE ? OR a.name_of_technician LIKE ? OR a.center_name LIKE ?)';
+          const term = `%${filters.search}%`;
+          params.push(term, term, term);
+        }
+
+        // 1. Fetch Aggregated Statistics
+        const summarySql = `
+          SELECT 
+            COUNT(*) as total_records,
+            COALESCE(SUM(a.total_working_hrs), 0) as sum_total_working_hrs,
+            COALESCE(SUM(a.total_break_hrs), 0) as sum_total_break_hrs,
+            COALESCE(SUM(a.effective_working_hrs), 0) as sum_effective_working_hrs,
+            COALESCE(AVG(a.effective_working_hrs), 0) as avg_effective_working_hrs,
+            COUNT(DISTINCT a.emp_code_of_thetechnician) as total_active_employees,
+            COUNT(DISTINCT a.center_name) as total_centers
+          FROM preamji_attendance a
+          LEFT JOIN employee_details e ON a.emp_code_of_thetechnician = e.employee_code
+          ${whereClause}
+        `;
+
+        const [summaryRows]: any = await executeWithRetry(summarySql, params);
+        const sumRow = summaryRows[0] || {};
+
+        // 2. Fetch Granular Records
+        const recordsSql = `
+          SELECT a.*, e.center_code as emp_center_code, e.center_location as emp_center_location
+          FROM preamji_attendance a
+          LEFT JOIN employee_details e ON a.emp_code_of_thetechnician = e.employee_code
+          ${whereClause}
+          ORDER BY a.attendance_date DESC, a.on_duty_in_time DESC
+        `;
+
+        const [recordRows]: any = await executeWithRetry(recordsSql, params);
+        const cleanedRecords = cleanRowBuffers(recordRows);
+
+        return {
+          summary: {
+            total_records: Number(sumRow.total_records || 0),
+            sum_total_working_hrs: Number(Number(sumRow.sum_total_working_hrs || 0).toFixed(2)),
+            sum_total_break_hrs: Number(Number(sumRow.sum_total_break_hrs || 0).toFixed(2)),
+            sum_effective_working_hrs: Number(Number(sumRow.sum_effective_working_hrs || 0).toFixed(2)),
+            avg_effective_working_hrs: Number(Number(sumRow.avg_effective_working_hrs || 0).toFixed(2)),
+            total_active_employees: Number(sumRow.total_active_employees || 0),
+            total_centers: Number(sumRow.total_centers || 0)
+          },
+          records: cleanedRecords
+        };
+      } catch (err: any) {
+        console.warn('MySQL getAttendanceSummaryReport error, falling back to local calculation:', err?.message || err);
+      }
+    }
+
+    // Local DB fallback aggregation
+    const store = readLocalDb();
+    let records = [...store.preamji_attendance];
+
+    if (filters.startDate) {
+      records = records.filter(r => r.attendance_date >= filters.startDate!);
+    }
+    if (filters.endDate) {
+      records = records.filter(r => r.attendance_date <= filters.endDate!);
+    }
+    if (filters.centerCode) {
+      records = records.filter(r => r.center_code === filters.centerCode);
+    }
+    if (filters.centerName) {
+      records = records.filter(r => r.center_name === filters.centerName);
+    }
+    if (filters.employeeCode) {
+      records = records.filter(r => r.emp_code_of_thetechnician === filters.employeeCode);
+    }
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      records = records.filter(r =>
+        (r.emp_code_of_thetechnician || '').toLowerCase().includes(q) ||
+        (r.name_of_technician || '').toLowerCase().includes(q) ||
+        (r.center_name || '').toLowerCase().includes(q)
+      );
+    }
+
+    records.sort((a, b) => b.attendance_date.localeCompare(a.attendance_date));
+
+    let sumWork = 0;
+    let sumBreak = 0;
+    let sumEff = 0;
+    const emps = new Set<string>();
+    const cntrs = new Set<string>();
+
+    records.forEach(r => {
+      sumWork += Number(r.total_working_hrs || 0);
+      sumBreak += Number(r.total_break_hrs || 0);
+      sumEff += Number(r.effective_working_hrs || 0);
+      if (r.emp_code_of_thetechnician) emps.add(r.emp_code_of_thetechnician);
+      if (r.center_name) cntrs.add(r.center_name);
+    });
+
+    const totalCount = records.length;
+    return {
+      summary: {
+        total_records: totalCount,
+        sum_total_working_hrs: Number(sumWork.toFixed(2)),
+        sum_total_break_hrs: Number(sumBreak.toFixed(2)),
+        sum_effective_working_hrs: Number(sumEff.toFixed(2)),
+        avg_effective_working_hrs: totalCount > 0 ? Number((sumEff / totalCount).toFixed(2)) : 0,
+        total_active_employees: emps.size,
+        total_centers: cntrs.size
+      },
+      records
+    };
   },
 
   async getAttendanceHistory(empCode: string, limit = 30): Promise<PremjiAttendance[]> {
