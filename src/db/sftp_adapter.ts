@@ -169,10 +169,10 @@ export const sftpStorage = {
       }
     }
 
-    // 3. Upload to remote SFTP storage
+    // 3. Queue non-blocking background sync to remote SFTP storage (0ms HTTP overhead)
     if (hasSftpConfig() && buffer && buffer.length > 0) {
-      try {
-        await sftpManager.withClient(async (sftp) => {
+      setImmediate(() => {
+        sftpManager.withClient(async (sftp) => {
           const targetDir = `${REMOTE_BASE_DIR}/${cleanRelativePath}`.replace(/\/+/g, '/');
           const targetPath = `${targetDir}/${fileName}`.replace(/\/+/g, '/');
 
@@ -181,11 +181,11 @@ export const sftpStorage = {
             await sftp.mkdir(targetDir, true);
           }
           await sftp.put(buffer, targetPath);
-          console.log(`✅ Uploaded to VPS SFTP: ${targetPath}`);
+          console.log(`⚡ [Background Sync] Uploaded to VPS SFTP: ${targetPath}`);
+        }).catch((e) => {
+          console.warn('SFTP background upload notice:', e?.message);
         });
-      } catch (e: any) {
-        console.warn('SFTP upload error:', e?.message);
-      }
+      });
     }
 
     return displayPath;
