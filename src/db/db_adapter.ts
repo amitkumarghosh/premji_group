@@ -1106,7 +1106,7 @@ export const db = {
 
         // 2. Fetch Granular Records
         const recordsSql = `
-          SELECT a.*, e.center_code as emp_center_code, e.center_location as emp_center_location
+          SELECT a.*, e.user_role, e.user_details, e.center_code as emp_center_code, e.center_location as emp_center_location
           FROM preamji_attendance a
           LEFT JOIN employee_details e ON a.emp_code_of_thetechnician = e.employee_code
           ${whereClause}
@@ -1135,33 +1135,47 @@ export const db = {
 
     // Local DB fallback aggregation
     const store = readLocalDb();
-    let records = [...store.preamji_attendance];
+    const empMapLocal = new Map<string, any>();
+    (store.employee_details || []).forEach((e: any) => {
+      empMapLocal.set(e.employee_code, e);
+    });
+
+    let records: any[] = store.preamji_attendance.map((r: any) => {
+      const emp = empMapLocal.get(r.emp_code_of_thetechnician);
+      return {
+        ...r,
+        user_role: emp?.user_role || 'Technician',
+        user_details: emp?.user_details || null,
+        emp_center_code: emp?.center_code || r.center_code,
+        emp_center_location: emp?.center_location || r.center_location
+      };
+    });
 
     if (filters.startDate) {
-      records = records.filter(r => r.attendance_date >= filters.startDate!);
+      records = records.filter((r: any) => r.attendance_date >= filters.startDate!);
     }
     if (filters.endDate) {
-      records = records.filter(r => r.attendance_date <= filters.endDate!);
+      records = records.filter((r: any) => r.attendance_date <= filters.endDate!);
     }
     if (filters.centerCode) {
-      records = records.filter(r => r.center_code === filters.centerCode);
+      records = records.filter((r: any) => r.center_code === filters.centerCode);
     }
     if (filters.centerName) {
-      records = records.filter(r => r.center_name === filters.centerName);
+      records = records.filter((r: any) => r.center_name === filters.centerName);
     }
     if (filters.employeeCode) {
-      records = records.filter(r => r.emp_code_of_thetechnician === filters.employeeCode);
+      records = records.filter((r: any) => r.emp_code_of_thetechnician === filters.employeeCode);
     }
     if (filters.search) {
       const q = filters.search.toLowerCase();
-      records = records.filter(r =>
+      records = records.filter((r: any) =>
         (r.emp_code_of_thetechnician || '').toLowerCase().includes(q) ||
         (r.name_of_technician || '').toLowerCase().includes(q) ||
         (r.center_name || '').toLowerCase().includes(q)
       );
     }
 
-    records.sort((a, b) => b.attendance_date.localeCompare(a.attendance_date));
+    records.sort((a: any, b: any) => b.attendance_date.localeCompare(a.attendance_date));
 
     let sumWork = 0;
     let sumBreak = 0;
@@ -1169,7 +1183,7 @@ export const db = {
     const emps = new Set<string>();
     const cntrs = new Set<string>();
 
-    records.forEach(r => {
+    records.forEach((r: any) => {
       sumWork += Number(r.total_working_hrs || 0);
       sumBreak += Number(r.total_break_hrs || 0);
       sumEff += Number(r.effective_working_hrs || 0);

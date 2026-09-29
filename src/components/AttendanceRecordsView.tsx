@@ -26,8 +26,12 @@ import {
   Square,
   ArrowRight,
   XCircle,
-  AlertTriangle
+  AlertTriangle,
+  BarChart3,
+  TrendingUp,
+  FileText
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { formatPhotoUrl, FALLBACK_IMAGE_SVG } from '../utils/photoUtils.ts';
 import { authFetch } from '../utils/api.ts';
 import { formatIstTimeDisplay, formatIstFullDisplay, getIstDateString, calculateHours, calculateEffectiveHours } from '../lib/ist-time.ts';
@@ -39,7 +43,7 @@ interface AttendanceRecordsViewProps {
   onInspectImage: (img: { url: string; title: string }) => void;
 }
 
-type TabType = 'summary' | 'add' | 'edit';
+type TabType = 'summary' | 'add' | 'edit' | 'report';
 
 export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
   user,
@@ -47,6 +51,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
   onNotification,
   onInspectImage
 }) => {
+  const isTeamLeader = user?.user_role === 'TeamLeader';
   const today = getIstDateString();
 
   // Main Navigation Tab
@@ -118,6 +123,24 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
   });
   const [submittingEdit, setSubmittingEdit] = useState(false);
   const [loadingEditRecord, setLoadingEditRecord] = useState(false);
+
+  // ==================== TAB 4: ATTENDANCE REPORT STATE ====================
+  const [reportFilters, setReportFilters] = useState({
+    start_date: getIstDateString(new Date(Date.now() - 30 * 86400000)),
+    end_date: today,
+    center_code: isTeamLeader ? (user.center_code || '') : '',
+    search: ''
+  });
+  const [reportPreset, setReportPreset] = useState<'today' | 'week' | 'month' | 'last30' | 'custom'>('last30');
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportData, setReportData] = useState<any[]>([]);
+  const [reportSummary, setReportSummary] = useState({
+    total_technicians: 0,
+    total_shifts: 0,
+    total_working_hrs: 0,
+    total_break_hrs: 0,
+    total_effective_hrs: 0
+  });
 
   // Load Employees on Mount
   useEffect(() => {
@@ -279,6 +302,272 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
     document.body.removeChild(link);
     onNotification('Attendance CSV report downloaded successfully!', 'success');
   };
+
+  // ==================== TAB 4: AGGREGATED ATTENDANCE REPORT LOGIC ====================
+  const loadAggregatedReport = async () => {
+    try {
+      setReportLoading(true);
+      const params = new URLSearchParams();
+      if (reportFilters.start_date) params.append('startDate', reportFilters.start_date);
+      if (reportFilters.end_date) params.append('endDate', reportFilters.end_date);
+      if (reportFilters.center_code) params.append('centerCode', reportFilters.center_code);
+      if (reportFilters.search) params.append('search', reportFilters.search);
+
+      const res = await authFetch(`/api/admin/attendance/summary?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        const rawRecords: any[] = data.records || [];
+
+        // Summation & Grouping Map
+        const empMap = new Map<string, any>();
+        let grandGross = 0;
+        let grandBreak = 0;
+        let grandEff = 0;
+
+        rawRecords.forEach((r) => {
+          const code = r.emp_code_of_thetechnician || 'UNKNOWN';
+          const gross = Number(r.total_working_hrs || 0);
+          const brk = Number(r.total_break_hrs || 0);
+          const eff = Number(r.effective_working_hrs || 0);
+
+          grandGross += gross;
+          grandBreak += brk;
+          grandEff += eff;
+
+          if (!empMap.has(code)) {
+            const empDetails = employees.find((e) => e.employee_code === code);
+            empMap.set(code, {
+              emp_code: code,
+              emp_name: r.name_of_technician || code,
+              user_role: r.user_role || empDetails?.user_role || 'Technician',
+              user_details: r.user_details || empDetails?.user_details || '',
+              center_name: r.center_name || empDetails?.center_name || 'Unassigned',
+              center_code: r.center_code || r.emp_center_code || empDetails?.center_code || '',
+              total_shifts: 0,
+              total_working_hrs: 0,
+              total_break_hrs: 0,
+              effective_working_hrs: 0
+            });
+          }
+
+          const item = empMap.get(code)!;
+          item.total_shifts += 1;
+          item.total_working_hrs += gross;
+          item.total_break_hrs += brk;
+          item.effective_working_hrs += eff;
+        });
+
+        const aggregatedList = Array.from(empMap.values()).map((item) => ({
+          ...item,
+          total_working_hrs: Number(item.total_working_hrs.toFixed(2)),
+          total_break_hrs: Number(item.total_break_hrs.toFixed(2)),
+          effective_working_hrs: Number(item.effective_working_hrs.toFixed(2)),
+          avg_daily_effective: item.total_shifts > 0 ? Number((item.effective_working_hrs / item.total_shifts).toFixed(2)) : 0
+        }));
+
+        // Sort alphabetically by Technician Name
+        aggregatedList.sort((a, b) => a.emp_name.localeCompare(b.emp_name));
+
+        setReportData(aggregatedList);
+        setReportSummary({
+          total_technicians: aggregatedList.length,
+          total_shifts: rawRecords.length,
+          total_working_hrs: Number(grandGross.toFixed(2)),
+          total_break_hrs: Number(grandBreak.toFixed(2)),
+          total_effective_hrs: Number(grandEff.toFixed(2))
+        });
+      } else {
+        onNotification('Failed to load attendance report', 'error');
+      }
+    } catch (err) {
+      console.error('Report error:', err);
+      onNotification('Error fetching report', 'error');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const handleReportPreset = (preset: 'today' | 'week' | 'month' | 'last30') => {
+    setReportPreset(preset);
+    const todayStr = getIstDateString();
+    if (preset === 'today') {
+      setReportFilters((prev) => ({ ...prev, start_date: todayStr, end_date: todayStr }));
+    } else if (preset === 'week') {
+      const wStr = getIstDateString(new Date(Date.now() - 7 * 86400000));
+      setReportFilters((prev) => ({ ...prev, start_date: wStr, end_date: todayStr }));
+    } else if (preset === 'month') {
+      const d = new Date();
+      const firstDay = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      setReportFilters((prev) => ({ ...prev, start_date: firstDay, end_date: todayStr }));
+    } else if (preset === 'last30') {
+      const mStr = getIstDateString(new Date(Date.now() - 30 * 86400000));
+      setReportFilters((prev) => ({ ...prev, start_date: mStr, end_date: todayStr }));
+    }
+  };
+
+  // Export Report to Excel (.xlsx) with meaningful headers
+  const handleExportReportExcel = () => {
+    if (reportData.length === 0) {
+      onNotification('No report data to export', 'error');
+      return;
+    }
+
+    try {
+      const headers = [
+        'Sl No',
+        'Employee Code',
+        'Technician / Staff Name',
+        'User Role / Designation',
+        'User Details / Remarks',
+        'Workshop Center',
+        'Total Shifts (Days Present)',
+        'Total Gross Working Hours (h)',
+        'Total Break Hours (h)',
+        'Total Net Effective Working Hours (h)',
+        'Average Daily Working Hours (h/day)',
+        'Report Start Date',
+        'Report End Date'
+      ];
+
+      const rows: any[][] = reportData.map((item, index) => [
+        index + 1,
+        item.emp_code,
+        item.emp_name,
+        item.user_role || 'Technician',
+        item.user_details || '',
+        item.center_name,
+        item.total_shifts,
+        item.total_working_hrs,
+        item.total_break_hrs,
+        item.effective_working_hrs,
+        item.avg_daily_effective,
+        reportFilters.start_date,
+        reportFilters.end_date
+      ]);
+
+      // Grand Total row at the bottom
+      rows.push([
+        'TOTAL',
+        `${reportSummary.total_technicians} Staff`,
+        'Grand Total All Technicians',
+        '—',
+        '—',
+        'All Centers',
+        reportSummary.total_shifts,
+        reportSummary.total_working_hrs,
+        reportSummary.total_break_hrs,
+        reportSummary.total_effective_hrs,
+        reportSummary.total_shifts > 0 ? Number((reportSummary.total_effective_hrs / reportSummary.total_shifts).toFixed(2)) : 0,
+        reportFilters.start_date,
+        reportFilters.end_date
+      ]);
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+      // Auto-fit column widths
+      ws['!cols'] = [
+        { wch: 8 },
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 22 },
+        { wch: 26 },
+        { wch: 26 },
+        { wch: 26 },
+        { wch: 28 },
+        { wch: 22 },
+        { wch: 34 },
+        { wch: 32 },
+        { wch: 18 },
+        { wch: 18 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Attendance Summary');
+      XLSX.writeFile(wb, `Premji_Attendance_Summary_Report_${reportFilters.start_date}_to_${reportFilters.end_date}.xlsx`);
+      onNotification('Attendance summary exported to Excel (.xlsx) successfully!', 'success');
+    } catch (e: any) {
+      console.error('Export Excel error:', e);
+      onNotification('Failed to generate Excel file', 'error');
+    }
+  };
+
+  // Export Report to CSV (.csv)
+  const handleExportReportCSV = () => {
+    if (reportData.length === 0) {
+      onNotification('No report data to export', 'error');
+      return;
+    }
+
+    const headers = [
+      'Sl No',
+      'Employee Code',
+      'Technician Name',
+      'User Role',
+      'User Details',
+      'Workshop Center',
+      'Total Shifts (Days Present)',
+      'Total Gross Working Hours (h)',
+      'Total Break Hours (h)',
+      'Total Net Effective Working Hours (h)',
+      'Average Daily Working Hours (h/day)',
+      'Report Start Date',
+      'Report End Date'
+    ];
+
+    const rows = reportData.map((item, index) => [
+      index + 1,
+      `"${item.emp_code}"`,
+      `"${item.emp_name}"`,
+      `"${item.user_role || 'Technician'}"`,
+      `"${(item.user_details || '').replace(/"/g, '""')}"`,
+      `"${item.center_name}"`,
+      item.total_shifts,
+      item.total_working_hrs,
+      item.total_break_hrs,
+      item.effective_working_hrs,
+      item.avg_daily_effective,
+      `"${reportFilters.start_date}"`,
+      `"${reportFilters.end_date}"`
+    ]);
+
+    rows.push([
+      '"TOTAL"',
+      `"${reportSummary.total_technicians} Staff"`,
+      '"Grand Total All Technicians"',
+      '"—"',
+      '"—"',
+      '"All Centers"',
+      reportSummary.total_shifts,
+      reportSummary.total_working_hrs,
+      reportSummary.total_break_hrs,
+      reportSummary.total_effective_hrs,
+      reportSummary.total_shifts > 0 ? Number((reportSummary.total_effective_hrs / reportSummary.total_shifts).toFixed(2)) : 0,
+      `"${reportFilters.start_date}"`,
+      `"${reportFilters.end_date}"`
+    ]);
+
+    const csvContent =
+      'data:text/csv;charset=utf-8,\uFEFF' +
+      [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute(
+      'download',
+      `Premji_Attendance_Summary_Report_${reportFilters.start_date}_to_${reportFilters.end_date}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    onNotification('Attendance summary CSV downloaded successfully!', 'success');
+  };
+
+  // Auto-load report when Report tab is selected or report filters change
+  useEffect(() => {
+    if (activeTab === 'report') {
+      loadAggregatedReport();
+    }
+  }, [activeTab, reportFilters.start_date, reportFilters.end_date, reportFilters.center_code]);
 
   const formatTimeToInput = (timeVal: string | null | undefined): string => {
     if (!timeVal) return '';
@@ -572,6 +861,19 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
         >
           <Edit3 className="h-4 w-4 text-indigo-600" />
           <span>Edit Attendance</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('report')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+            activeTab === 'report'
+              ? 'bg-white text-purple-800 shadow-md shadow-slate-300'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+          }`}
+        >
+          <BarChart3 className="h-4 w-4 text-purple-600" />
+          <span>Attendance Report</span>
         </button>
       </div>
 
@@ -1641,6 +1943,394 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 4: ATTENDANCE REPORT (DATE RANGE AGGREGATION & EXCEL DOWNLOAD)        */}
+      {/* ========================================================================= */}
+      {activeTab === 'report' && (
+        <div className="space-y-6">
+          {/* Top Header Banner */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-3xl border border-purple-100 bg-white/90 shadow-md backdrop-blur-xl">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-purple-100 text-xl shadow-inner">
+                📊
+              </span>
+              <div>
+                <h2 className="text-lg font-black text-slate-900">Attendance Summary &amp; Summation Report</h2>
+                <p className="text-xs text-slate-500 font-medium">
+                  Aggregated gross working hours, break durations, and net effective hours across date ranges with full Excel export.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={loadAggregatedReport}
+                disabled={reportLoading}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${reportLoading ? 'animate-spin text-purple-600' : ''}`} />
+                <span>Refresh Report</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportReportExcel}
+                disabled={reportData.length === 0}
+                className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-emerald-600/20 hover:from-emerald-700 hover:to-teal-700 transition cursor-pointer disabled:opacity-50"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>Export to Excel (.xlsx)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportReportCSV}
+                disabled={reportData.length === 0}
+                className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-purple-600/20 hover:from-purple-700 hover:to-indigo-700 transition cursor-pointer disabled:opacity-50"
+              >
+                <Download className="h-4 w-4" />
+                <span>Export CSV</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 5 Aggregated Report Metric KPI Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
+            <div className="rounded-2xl border border-purple-100 bg-white/90 p-4 shadow-sm backdrop-blur-xl">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
+                <span>Total Staff</span>
+                <Users className="h-4 w-4 text-purple-600" />
+              </div>
+              <div className="mt-2 font-mono text-2xl font-black text-slate-900">
+                {reportSummary.total_technicians}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Active in Range
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-sky-100 bg-white/90 p-4 shadow-sm backdrop-blur-xl">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
+                <span>Total Shifts</span>
+                <Calendar className="h-4 w-4 text-sky-600" />
+              </div>
+              <div className="mt-2 font-mono text-2xl font-black text-sky-700">
+                {reportSummary.total_shifts}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Logged Records
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm backdrop-blur-xl">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
+                <span>Gross Hours</span>
+                <Clock className="h-4 w-4 text-slate-600" />
+              </div>
+              <div className="mt-2 font-mono text-2xl font-black text-slate-800">
+                {reportSummary.total_working_hrs.toFixed(2)}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                SUM(total_working_hrs)
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-amber-100 bg-white/90 p-4 shadow-sm backdrop-blur-xl">
+              <div className="flex items-center justify-between text-amber-700 text-xs font-bold uppercase tracking-wider">
+                <span>Total Breaks</span>
+                <Coffee className="h-4 w-4 text-amber-600" />
+              </div>
+              <div className="mt-2 font-mono text-2xl font-black text-amber-700">
+                {reportSummary.total_break_hrs.toFixed(2)}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                SUM(total_break_hrs)
+              </div>
+            </div>
+
+            <div className="rounded-2xl border-2 border-emerald-400 bg-gradient-to-br from-emerald-600 to-teal-700 p-4 text-white shadow-lg shadow-emerald-600/20 col-span-2 md:col-span-1">
+              <div className="flex items-center justify-between text-emerald-100 text-xs font-bold uppercase tracking-wider">
+                <span>Net Effective</span>
+                <Award className="h-4 w-4 text-emerald-200" />
+              </div>
+              <div className="mt-2 font-mono text-2xl font-black text-white">
+                {reportSummary.total_effective_hrs.toFixed(2)}
+              </div>
+              <div className="text-[11px] text-emerald-100/90 mt-0.5 font-medium">
+                SUM(effective_working_hrs)
+              </div>
+            </div>
+          </div>
+
+          {/* Date Range & Filter Card */}
+          <div className="p-6 rounded-3xl border border-purple-100 bg-white/90 shadow-md backdrop-blur-xl space-y-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                loadAggregatedReport();
+              }}
+              className="space-y-4"
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  <Filter className="h-4 w-4 text-purple-600" />
+                  <span>Report Filter Range</span>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="text-[11px] text-slate-400 mr-1 font-semibold">Presets:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleReportPreset('today')}
+                    className={`rounded-xl px-3 py-1.5 transition cursor-pointer font-bold ${
+                      reportPreset === 'today'
+                        ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-500'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleReportPreset('week')}
+                    className={`rounded-xl px-3 py-1.5 transition cursor-pointer font-bold ${
+                      reportPreset === 'week'
+                        ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-500'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    Last 7 Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleReportPreset('month')}
+                    className={`rounded-xl px-3 py-1.5 transition cursor-pointer font-bold ${
+                      reportPreset === 'month'
+                        ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-500'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    This Month
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleReportPreset('last30')}
+                    className={`rounded-xl px-3 py-1.5 transition cursor-pointer font-bold ${
+                      reportPreset === 'last30'
+                        ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-500'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    Last 30 Days
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    value={reportFilters.start_date}
+                    onChange={(e) => {
+                      setReportPreset('custom');
+                      setReportFilters({ ...reportFilters, start_date: e.target.value });
+                    }}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-purple-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    value={reportFilters.end_date}
+                    onChange={(e) => {
+                      setReportPreset('custom');
+                      setReportFilters({ ...reportFilters, end_date: e.target.value });
+                    }}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-purple-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                    Workshop Center
+                  </label>
+                  <select
+                    value={reportFilters.center_code}
+                    onChange={(e) => setReportFilters({ ...reportFilters, center_code: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-purple-500 focus:outline-none bg-white"
+                  >
+                    <option value="">All Centers</option>
+                    {centers.map((c) => (
+                      <option key={c.center_code} value={c.center_code}>
+                        {c.center_name || c.center_code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                    Search Code / Name
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="e.g. PS027 or Suresh"
+                      value={reportFilters.search}
+                      onChange={(e) => setReportFilters({ ...reportFilters, search: e.target.value })}
+                      className="w-full rounded-xl border border-slate-200 pl-8 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-purple-500 focus:outline-none"
+                    />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  </div>
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    disabled={reportLoading}
+                    className="w-full rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-purple-700 transition cursor-pointer"
+                  >
+                    Generate Report
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          {/* Summation Report Table */}
+          <div className="rounded-3xl border border-purple-100 bg-white/90 overflow-hidden shadow-md backdrop-blur-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-700">
+                <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="py-3 px-3 text-center w-12">#</th>
+                    <th className="py-3 px-4">Employee Code</th>
+                    <th className="py-3 px-4">Employee Name</th>
+                    <th className="py-3 px-3.5 text-center">User Role</th>
+                    <th className="py-3 px-4">User Details</th>
+                    <th className="py-3 px-4">Workshop Center</th>
+                    <th className="py-3 px-4 text-center">Days Present (Shifts)</th>
+                    <th className="py-3 px-4 text-right">Total Gross Hours (h)</th>
+                    <th className="py-3 px-4 text-right">Total Break Hours (h)</th>
+                    <th className="py-3 px-4 text-right">Total Net Effective Hours (h)</th>
+                    <th className="py-3 px-4 text-right">Avg Daily Effective (h)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {reportLoading ? (
+                    <tr>
+                      <td colSpan={11} className="py-16 text-center text-slate-400">
+                        <RefreshCw className="mx-auto h-6 w-6 animate-spin text-purple-600 mb-2" />
+                        <span>Aggregating attendance summation report...</span>
+                      </td>
+                    </tr>
+                  ) : reportData.length === 0 ? (
+                    <tr>
+                      <td colSpan={11} className="py-16 text-center text-slate-400">
+                        No attendance records found for the selected date range and filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    reportData.map((item, index) => (
+                      <tr key={item.emp_code} className="hover:bg-purple-50/40 transition">
+                        <td className="py-3 px-3 text-center font-mono font-bold text-slate-400">
+                          {index + 1}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="font-mono font-black text-purple-800 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                            {item.emp_code}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">
+                          {item.emp_name}
+                        </td>
+                        <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            item.user_role === 'TeamLeader'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : item.user_role === 'Admin' || item.user_role === 'Super Admin'
+                              ? 'bg-indigo-100 text-indigo-800 border border-indigo-300'
+                              : 'bg-slate-100 text-slate-700 border border-slate-200'
+                          }`}>
+                            {item.user_role || 'Technician'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 max-w-[180px] truncate" title={item.user_details || 'No additional details'}>
+                          {item.user_details ? (
+                            <span className="font-medium text-slate-700">{item.user_details}</span>
+                          ) : (
+                            <span className="text-slate-400 italic text-[11px]">—</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
+                          {item.center_name}
+                        </td>
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                            {item.total_shifts} shifts
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-800 whitespace-nowrap">
+                          {item.total_working_hrs.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-amber-700 whitespace-nowrap">
+                          {item.total_break_hrs.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-md font-mono text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            {item.effective_working_hrs.toFixed(2)} hrs
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-semibold text-slate-700 whitespace-nowrap">
+                          {item.avg_daily_effective.toFixed(2)} hrs/day
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                {reportData.length > 0 && !reportLoading && (
+                  <tfoot className="bg-slate-100/90 border-t-2 border-slate-300 font-bold text-slate-900">
+                    <tr>
+                      <td colSpan={6} className="py-3.5 px-4 text-xs uppercase tracking-wider font-black text-purple-900">
+                        Grand Total ({reportSummary.total_technicians} Technicians)
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-mono font-black text-sky-800">
+                        {reportSummary.total_shifts} Total Shifts
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono font-black text-slate-900">
+                        {reportSummary.total_working_hrs.toFixed(2)} hrs
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono font-black text-amber-800">
+                        {reportSummary.total_break_hrs.toFixed(2)} hrs
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono font-black text-emerald-800">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-emerald-200/80 text-emerald-900 border border-emerald-400">
+                          {reportSummary.total_effective_hrs.toFixed(2)} hrs
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono font-black text-purple-900">
+                        {reportSummary.total_shifts > 0
+                          ? (reportSummary.total_effective_hrs / reportSummary.total_shifts).toFixed(2)
+                          : '0.00'} hrs/day
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
           </div>
         </div>
       )}
