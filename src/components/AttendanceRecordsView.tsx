@@ -244,7 +244,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
       'Effective Working Hrs',
       'Initial Check-In (Ground Truth)',
       'Last Edit Timestamp',
-      'Last Edited By',
+      'Attendance Marked By',
       'Admin Remarks'
     ];
 
@@ -838,7 +838,7 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                     <th className="py-3 px-4 text-right">Gross (h)</th>
                     <th className="py-3 px-4 text-right">Break (h)</th>
                     <th className="py-3 px-4 text-right">Effective (h)</th>
-                    <th className="py-3 px-4">Audit Trail</th>
+                    <th className="py-3 px-4">Attendance Marked By &amp; Remarks</th>
                     <th className="py-3 px-4 text-center">Action</th>
                   </tr>
                 </thead>
@@ -1027,18 +1027,23 @@ export const AttendanceRecordsView: React.FC<AttendanceRecordsViewProps> = ({
                             </span>
                           </td>
 
-                          {/* Audit Trail & Remarks */}
-                          <td className="py-3 px-4 text-[10px] text-slate-500 whitespace-nowrap">
-                            {r.last_edited_by && (
-                              <div className="font-medium text-slate-700">
-                                By: <span className="font-mono text-sky-700">{r.last_edited_by}</span>
+                          {/* Attendance Marked By & Remarks */}
+                          <td className="py-3 px-4 text-xs whitespace-nowrap">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] uppercase font-bold text-slate-400">Marked By:</span>
+                                <span className="font-mono text-xs font-black text-sky-800 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200">
+                                  {r.last_edited_by || r.emp_code_of_thetechnician || 'Self'}
+                                </span>
                               </div>
-                            )}
-                            {r.admin_remarks && (
-                              <div className="text-slate-600 truncate max-w-[140px]" title={r.admin_remarks}>
-                                💬 {r.admin_remarks}
-                              </div>
-                            )}
+                              {r.admin_remarks ? (
+                                <div className="text-[11px] text-slate-700 font-medium max-w-[190px] truncate" title={r.admin_remarks}>
+                                  💬 {r.admin_remarks}
+                                </div>
+                              ) : (
+                                <div className="text-[10px] text-slate-400 italic">No remarks</div>
+                              )}
+                            </div>
                           </td>
 
                           {/* Direct Edit Action */}

@@ -302,6 +302,11 @@ export async function createExpressApp() {
       // Existing today record lookup
       const existing = await db.getTodayAttendance(empCode, istDateStr);
 
+      const isMarkedByOther = req.user!.employee_code !== empCode;
+      const defaultRemarks = isMarkedByOther 
+        ? `Marked by TeamLeader / Proxy (${req.user!.employee_code})` 
+        : (existing?.admin_remarks || null);
+
       const attPayload: any = {
         emp_code_of_thetechnician: empCode,
         name_of_technician: empName,
@@ -310,12 +315,9 @@ export async function createExpressApp() {
         center_location: existing?.center_location || centerLocation || 'Unassigned',
         attendance_date: istDateStr,
         last_edit_timestamp: currentIstDateTime,
-        last_edited_by: req.user!.employee_code
+        last_edited_by: req.user!.employee_code,
+        admin_remarks: admin_remarks || defaultRemarks
       };
-
-      if (admin_remarks) {
-        attPayload.admin_remarks = admin_remarks;
-      }
 
       if (checkpoint === 'on_duty_in') {
         attPayload.on_duty_in_time = currentIstDateTime;
