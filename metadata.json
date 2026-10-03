@@ -1,6 +1,6 @@
 {
-  "name": "Premji Groups Enterprise Operations Portal",
-  "description": "The high-performance operations portal for Premji Groups. Track attendance, manage workshop centers, create and dispatch work orders, and supervise employee task allocations.",
+  "name": "Premjis Group Enterprise Operations Portal",
+  "description": "The high-performance operations portal for Premjis Group. Track attendance, manage workshop centers, create and dispatch work orders, and supervise employee task allocations.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

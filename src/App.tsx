@@ -353,7 +353,7 @@ export default function App() {
           <div className="w-16 h-16 mb-4 bg-gradient-to-tr from-sky-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-xl shadow-sky-500/25 animate-pulse">
             <span className="text-3xl">🚗</span>
           </div>
-          <h1 className="text-2xl font-black tracking-tight text-white">PREMJI GROUPS</h1>
+          <h1 className="text-2xl font-black tracking-tight text-white">PREMJIS GROUP</h1>
           <p className="text-xs text-sky-300 font-semibold tracking-wider uppercase mt-1">Enterprise Operations Portal</p>
 
           <div className="w-56 h-1.5 bg-slate-800 rounded-full mt-6 overflow-hidden relative">
@@ -378,7 +378,7 @@ export default function App() {
             <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-tr from-sky-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-500/25">
               <span className="text-2xl">🚗</span>
             </div>
-            <h1 className="text-2xl font-black tracking-tight text-white">PREMJI GROUPS</h1>
+            <h1 className="text-2xl font-black tracking-tight text-white">PREMJIS GROUP</h1>
             <p className="text-xs text-sky-200/80 font-medium tracking-wide uppercase mt-1">Enterprise Operations Portal</p>
           </div>
 
@@ -473,7 +473,7 @@ export default function App() {
                 P
               </div>
               <div>
-                <h1 className="text-sm font-black tracking-tight text-white leading-tight">PREMJI GROUPS</h1>
+                <h1 className="text-sm font-black tracking-tight text-white leading-tight">PREMJIS GROUP</h1>
                 <p className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Enterprise Portal</p>
               </div>
             </div>

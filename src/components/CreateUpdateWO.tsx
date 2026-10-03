@@ -545,8 +545,8 @@ export const CreateUpdateWO: React.FC<CreateUpdateWOProps> = ({
   const serviceLabels: { key: keyof typeof services; label: string }[] = [
     { key: 'brake_testing', label: 'Brake Testing' },
     { key: 'carbon_cleaning_decarb', label: 'Carbon Cleaning / Decarb' },
-    { key: 'disc_cutting', label: 'Disc Cutting' },
-    { key: 'drum_cutting', label: 'Drum Cutting' },
+    { key: 'disc_cutting', label: 'Disc Skimming' },
+    { key: 'drum_cutting', label: 'Drum Skimming' },
     { key: 'puncture_removed', label: 'Puncture Removed' },
     { key: 'tpms_replacement', label: 'TPMS Replacement' },
     { key: 'tyre_fitting', label: 'Tyre Fitting' },
