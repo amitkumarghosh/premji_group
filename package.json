@@ -33,7 +33,7 @@
     "@types/ssh2": "^1.15.6",
     "@types/ssh2-sftp-client": "^9.0.6",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"
