@@ -156,8 +156,12 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
 
   // Ultra-Fast Client-Side Compression Pipeline (<30ms execution)
   // Captures the FULL uncropped original camera frame (including entire background & surroundings) for Admin inspection
-  const captureAndCompressImage = (): string | null => {
+  const captureAndCompressImage = async (): Promise<{ base64: string; canvas: HTMLCanvasElement } | null> => {
     const video = videoRef.current;
+    if (!video || video.readyState < 2 || video.videoWidth === 0) {
+      console.warn('Camera video stream not ready for capture');
+      return null;
+    }
 
     // Off-screen canvas sized to 640x480 for lightweight payload (~35KB)
     const canvas = document.createElement('canvas');
@@ -167,28 +171,38 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    let capturedRealVideo = false;
-
-    if (video && (video.videoWidth > 0 || video.readyState >= 1)) {
-      try {
-        if (facingMode === 'user') {
-          ctx.save();
-          ctx.translate(canvas.width, 0);
-          ctx.scale(-1, 1);
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          ctx.restore();
-        } else {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        }
-        capturedRealVideo = true;
-      } catch (drawErr) {
-        console.warn('Direct video draw error:', drawErr);
+    try {
+      if (facingMode === 'user') {
+        ctx.save();
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       }
+    } catch (drawErr) {
+      console.warn('Direct video draw error:', drawErr);
+      return null;
     }
 
-    if (!capturedRealVideo) {
-      console.warn('Camera video frame was not ready at capture moment');
-      return null;
+    // Validate that canvas is not pitch-black (minimum brightness check)
+    try {
+      const sampleW = 80;
+      const sampleH = 80;
+      const imgData = ctx.getImageData(canvas.width / 2 - sampleW / 2, canvas.height / 2 - sampleH / 2, sampleW, sampleH);
+      let totalLum = 0;
+      const pixels = imgData.data;
+      for (let i = 0; i < pixels.length; i += 4) {
+        totalLum += (pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114);
+      }
+      const avgLum = totalLum / (pixels.length / 4);
+      if (avgLum < 10) {
+        console.warn('Captured frame is pitch black (lum:', avgLum, ')');
+        return null;
+      }
+    } catch (e) {
+      // Non-blocking fallback
     }
 
     // Embed IST authentication timestamp watermark
@@ -211,7 +225,13 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
     ctx.fillText(`● PREMJI SECURE IST: ${timeNow}`, 16, canvas.height - 17);
 
     // Fast JPEG compression at 0.75 quality
-    return canvas.toDataURL('image/jpeg', 0.75);
+    const base64 = canvas.toDataURL('image/jpeg', 0.75);
+    if (!base64 || base64.length < 5000) {
+      console.warn('Captured image payload too small / incomplete');
+      return null;
+    }
+
+    return { base64, canvas };
   };
 
   // Execute Attendance Punch (<300ms end-to-end turnaround)
@@ -225,11 +245,28 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
       setFlashActive(true);
       setTimeout(() => setFlashActive(false), 160);
 
-      const base64Image = captureAndCompressImage();
-      if (!base64Image) {
-        onNotification('Could not capture camera frame. Please check camera permission.', 'error');
+      const captureResult = await captureAndCompressImage();
+      if (!captureResult) {
+        onNotification('Could not capture clear camera frame. Please ensure camera has light and permission.', 'error');
         setCapturing(false);
         return;
+      }
+
+      const { base64: base64Image, canvas } = captureResult;
+
+      // Native Browser Face Visibility Check (Shape Detection API supported in Chrome/Edge/Android)
+      if ('FaceDetector' in window) {
+        try {
+          const detector = new (window as any).FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
+          const detectedFaces = await detector.detect(canvas);
+          if (detectedFaces && detectedFaces.length === 0) {
+            onNotification('❌ No human face detected in camera! Please keep your full face inside the oval guide and retake.', 'error');
+            setCapturing(false);
+            return;
+          }
+        } catch (detectorErr) {
+          // Soft continue if detector API throws in browser sandbox
+        }
       }
 
       const payload: any = {
@@ -321,7 +358,14 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
         </div>
       </div>
 
-      {/* Square Camera Viewport with Pure Mask (No oval border, outside area completely hidden) */}
+      {/* Face Alignment Instruction Guide */}
+      <div className="mb-2 flex items-center justify-center">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-3.5 py-1 text-[11px] font-bold text-sky-700 border border-sky-200 shadow-2xs">
+          📸 Keep your full face inside the oval guide
+        </span>
+      </div>
+
+      {/* Square Camera Viewport with Pure Mask */}
       <div className="relative mx-auto max-w-[320px]">
         <div className="relative aspect-square w-full overflow-hidden rounded-3xl border border-slate-300 bg-slate-950 shadow-xl flex items-center justify-center">
           {/* Shutter Flash Effect Overlay */}
@@ -358,8 +402,7 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
               />
 
               {/* Clean Oval Face Mask:
-                  100% solid opaque dark overlay completely hiding everything outside of the oval.
-                  Zero oval border stroke (no red line). */}
+                  100% solid opaque dark overlay completely hiding everything outside of the oval */}
               <div className="absolute inset-0 pointer-events-none">
                 <svg
                   className="w-full h-full"
@@ -381,6 +424,19 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
                     height="300"
                     fill="#020617"
                     mask="url(#clean-oval-window)"
+                  />
+
+                  {/* Subtle face guide oval ring */}
+                  <ellipse
+                    cx="150"
+                    cy="150"
+                    rx="90"
+                    ry="122"
+                    fill="none"
+                    stroke="#38bdf8"
+                    strokeWidth="2"
+                    strokeDasharray="6 4"
+                    opacity="0.7"
                   />
                 </svg>
               </div>

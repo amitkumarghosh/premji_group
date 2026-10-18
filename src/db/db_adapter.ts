@@ -158,12 +158,20 @@ export function toMysqlDatetime(timeVal: string | null | undefined, dateStr: str
   return `${dateStr} ${timeVal}`;
 }
 
+const DEFAULT_MYSQL = {
+  host: 'srv1044851.hstgr.cloud',
+  port: 3306,
+  user: 'premji',
+  password: '$Trong_Passw0rd',
+  database: 'premji_group'
+};
+
 // Helper to check MySQL configuration
 const hasMySqlConfig = () => {
   return !!(
-    process.env.MYSQL_HOST &&
-    process.env.MYSQL_USER &&
-    process.env.MYSQL_DATABASE
+    (process.env.MYSQL_HOST || DEFAULT_MYSQL.host) &&
+    (process.env.MYSQL_USER || DEFAULT_MYSQL.user) &&
+    (process.env.MYSQL_DATABASE || DEFAULT_MYSQL.database)
   );
 };
 
@@ -245,11 +253,11 @@ export async function initDatabase() {
     try {
       console.log('🔄 Attempting connection to Production MySQL Database...');
       mysqlPool = mysql.createPool({
-        host: process.env.MYSQL_HOST,
-        port: Number(process.env.MYSQL_PORT || 3306),
-        user: process.env.MYSQL_USER,
-        password: process.env.MYSQL_PASSWORD,
-        database: process.env.MYSQL_DATABASE,
+        host: process.env.MYSQL_HOST || DEFAULT_MYSQL.host,
+        port: Number(process.env.MYSQL_PORT || DEFAULT_MYSQL.port),
+        user: process.env.MYSQL_USER || DEFAULT_MYSQL.user,
+        password: process.env.MYSQL_PASSWORD || DEFAULT_MYSQL.password,
+        database: process.env.MYSQL_DATABASE || DEFAULT_MYSQL.database,
         waitForConnections: true,
         connectionLimit: 10,
         maxIdle: 10,

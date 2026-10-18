@@ -131,8 +131,11 @@ def verify_face(image_bytes, min_face_fraction=0.12):
     total_area = float(h * w)
 
     cascade_filename = "haarcascade_frontalface_default.xml"
+    if not os.path.exists(cascade_filename) and hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
+        cascade_filename = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+
     if not os.path.exists(cascade_filename):
-        # If cascade missing, do not block (but we can log/info if needed).
+        # If cascade missing, do not block
         return True, "cascade_missing"
 
     try:

@@ -297,6 +297,9 @@ export async function createExpressApp() {
       const fileName = `${empCode}_${checkpoint}_${Date.now()}.jpg`;
 
       const savedVirtualPath = await sftpStorage.uploadImage(relativeFolder, fileName, image);
+      if (!savedVirtualPath) {
+        return res.status(500).json({ error: 'Failed to upload verification photo to VPS storage. Please try again.' });
+      }
       const imageUrl = `/api/media/view?path=${savedVirtualPath}`;
 
       // Existing today record lookup

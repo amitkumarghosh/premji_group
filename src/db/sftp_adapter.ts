@@ -2,17 +2,25 @@ import Client from 'ssh2-sftp-client';
 import fs from 'fs';
 import path from 'path';
 
+const DEFAULT_SFTP = {
+  host: '72.60.202.149',
+  port: 22,
+  username: 'tools',
+  password: 'NatDhul#2025',
+  remoteBase: '/var/www/premji'
+};
+
 const SFTP_CONFIG: Client.ConnectOptions = {
-  host: process.env.SFTP_HOST,
-  port: Number(process.env.SFTP_PORT || 22),
-  username: process.env.SFTP_USER,
-  password: process.env.SFTP_PASSWORD,
-  readyTimeout: 8000,
-  retries: 2,
+  host: process.env.SFTP_HOST || DEFAULT_SFTP.host,
+  port: Number(process.env.SFTP_PORT || DEFAULT_SFTP.port),
+  username: process.env.SFTP_USER || DEFAULT_SFTP.username,
+  password: process.env.SFTP_PASSWORD || DEFAULT_SFTP.password,
+  readyTimeout: 10000,
+  retries: 3,
   retry_minTimeout: 500
 };
 
-const REMOTE_BASE_DIR = process.env.SFTP_REMOTE_BASE || '/var/www/premji';
+const REMOTE_BASE_DIR = process.env.SFTP_REMOTE_BASE || DEFAULT_SFTP.remoteBase;
 const LOCAL_UPLOADS_DIR = path.resolve(process.cwd(), 'data', 'uploads');
 const TMP_UPLOADS_DIR = path.join('/tmp', 'premji_uploads');
 
@@ -34,9 +42,9 @@ const missingFilesCache = new Set<string>();
 // Helper to check SFTP config
 const hasSftpConfig = () => {
   return !!(
-    process.env.SFTP_HOST &&
-    process.env.SFTP_USER &&
-    (process.env.SFTP_PASSWORD || process.env.SFTP_KEY)
+    (process.env.SFTP_HOST || DEFAULT_SFTP.host) &&
+    (process.env.SFTP_USER || DEFAULT_SFTP.username) &&
+    (process.env.SFTP_PASSWORD || process.env.SFTP_KEY || DEFAULT_SFTP.password)
   );
 };
 
@@ -169,23 +177,33 @@ export const sftpStorage = {
       }
     }
 
-    // 3. Queue non-blocking background sync to remote SFTP storage (0ms HTTP overhead)
-    if (hasSftpConfig() && buffer && buffer.length > 0) {
-      setImmediate(() => {
-        sftpManager.withClient(async (sftp) => {
-          const targetDir = `${REMOTE_BASE_DIR}/${cleanRelativePath}`.replace(/\/+/g, '/');
-          const targetPath = `${targetDir}/${fileName}`.replace(/\/+/g, '/');
+    // 3. Atomically sync to remote SFTP storage and verify file size > 0
+    let sftpSuccess = false;
+    if (hasSftpConfig() && buffer && buffer.length > 50) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const uploaded = await sftpManager.withClient(async (sftp) => {
+            const targetDir = `${REMOTE_BASE_DIR}/${cleanRelativePath}`.replace(/\/+/g, '/');
+            const targetPath = `${targetDir}/${fileName}`.replace(/\/+/g, '/');
 
-          const exists = await sftp.exists(targetDir);
-          if (!exists) {
-            await sftp.mkdir(targetDir, true);
+            const exists = await sftp.exists(targetDir);
+            if (!exists) {
+              await sftp.mkdir(targetDir, true);
+            }
+            await sftp.put(buffer, targetPath);
+            const stat = await sftp.stat(targetPath);
+            return !!(stat && stat.size > 0);
+          });
+
+          if (uploaded) {
+            sftpSuccess = true;
+            console.log(`⚡ [Verified SFTP Sync] Uploaded & Verified (${buffer.length} bytes): ${displayPath}`);
+            break;
           }
-          await sftp.put(buffer, targetPath);
-          console.log(`⚡ [Background Sync] Uploaded to VPS SFTP: ${targetPath}`);
-        }).catch((e) => {
-          console.warn('SFTP background upload notice:', e?.message);
-        });
-      });
+        } catch (uploadErr: any) {
+          console.warn(`[SFTP Attempt ${attempt}/2 Warning]: ${uploadErr?.message}`);
+        }
+      }
     }
 
     return displayPath;

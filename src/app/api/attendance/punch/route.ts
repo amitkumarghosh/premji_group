@@ -165,6 +165,12 @@ export async function POST(req: Request) {
     const fileName = `${empCode}_${checkpoint}_${Date.now()}.jpg`;
 
     const savedVirtualPath = await sftpStorage.uploadImage(relativeFolder, fileName, image);
+    if (!savedVirtualPath) {
+      return NextResponse.json(
+        { error: 'Failed to upload verification photo to VPS storage. Please try again.' },
+        { status: 500 }
+      );
+    }
     const imageUrl = `/api/media/view?path=${savedVirtualPath}`;
 
     // Actor performing this modification
