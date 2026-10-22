@@ -231,7 +231,7 @@ def attendance_page(user):
         cutoff_hm = (16, 0)
         try:
             with get_db_engine().connect() as conn:
-                setting_row = conn.execute(text("SELECT center_name FROM center_details WHERE center_code='SYS_BREAK_CUTOFF' LIMIT 1")).fetchone()
+                setting_row = conn.execute(text("SELECT center_name FROM center_details WHERE center_code IN ('SYS_BREAK_CUTOFF_TIME', 'SYS_BREAK_CUTOFF') ORDER BY id DESC LIMIT 1")).fetchone()
                 if setting_row and setting_row[0]:
                     parts = str(setting_row[0]).split(":")
                     cutoff_hm = (int(parts[0]), int(parts[1]))

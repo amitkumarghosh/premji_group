@@ -2366,22 +2366,28 @@ export const db = {
 
   async setSystemSetting(key: string, value: string, description: string = 'System Setting'): Promise<boolean> {
     const settingCode = key.startsWith('SYS_') ? key : `SYS_${key.toUpperCase()}`;
+    const syncKeys = (settingCode === 'SYS_BREAK_CUTOFF_TIME' || settingCode === 'SYS_BREAK_CUTOFF')
+      ? ['SYS_BREAK_CUTOFF_TIME', 'SYS_BREAK_CUTOFF']
+      : [settingCode];
+
     if (!useLocalDb && mysqlPool) {
       try {
-        const [rows]: any = await executeWithRetry(
-          'SELECT id FROM center_details WHERE center_code = ? LIMIT 1',
-          [settingCode]
-        );
-        if (rows && rows.length > 0) {
-          await executeWithRetry(
-            'UPDATE center_details SET center_name = ?, center_location = ?, status = "System" WHERE center_code = ?',
-            [value, description, settingCode]
+        for (const code of syncKeys) {
+          const [rows]: any = await executeWithRetry(
+            'SELECT id FROM center_details WHERE center_code = ? LIMIT 1',
+            [code]
           );
-        } else {
-          await executeWithRetry(
-            'INSERT INTO center_details (center_code, center_name, center_location, center_type, status) VALUES (?, ?, ?, "SETTINGS", "System")',
-            [settingCode, value, description]
-          );
+          if (rows && rows.length > 0) {
+            await executeWithRetry(
+              'UPDATE center_details SET center_name = ?, center_location = ?, status = "System" WHERE center_code = ?',
+              [value, description, code]
+            );
+          } else {
+            await executeWithRetry(
+              'INSERT INTO center_details (center_code, center_name, center_location, center_type, status) VALUES (?, ?, ?, "SETTINGS", "System")',
+              [code, value, description]
+            );
+          }
         }
         return true;
       } catch (err: any) {
@@ -2391,20 +2397,22 @@ export const db = {
     }
     const store = readLocalDb();
     if (!store.center_details) store.center_details = [];
-    const idx = store.center_details.findIndex((c: any) => c.center_code === settingCode);
-    if (idx >= 0) {
-      store.center_details[idx].center_name = value;
-      store.center_details[idx].center_location = description;
-      store.center_details[idx].status = 'System';
-    } else {
-      store.center_details.push({
-        id: Date.now(),
-        center_code: settingCode,
-        center_name: value,
-        center_location: description,
-        center_type: 'SETTINGS',
-        status: 'System'
-      });
+    for (const code of syncKeys) {
+      const idx = store.center_details.findIndex((c: any) => c.center_code === code);
+      if (idx >= 0) {
+        store.center_details[idx].center_name = value;
+        store.center_details[idx].center_location = description;
+        store.center_details[idx].status = 'System';
+      } else {
+        store.center_details.push({
+          id: Date.now(),
+          center_code: code,
+          center_name: value,
+          center_location: description,
+          center_type: 'SETTINGS',
+          status: 'System'
+        });
+      }
     }
     writeLocalDb(store);
     return true;
