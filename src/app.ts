@@ -284,6 +284,8 @@ export async function createExpressApp() {
       } else {
         const myDetails = await db.getEmployeeByCode(empCode, false);
         if (myDetails) {
+          empName = myDetails.employee_name || empName;
+          centerName = myDetails.center_name || centerName;
           centerLocation = myDetails.center_location || 'Main Center';
         }
       }
@@ -317,9 +319,8 @@ export async function createExpressApp() {
       const attPayload: any = {
         emp_code_of_thetechnician: empCode,
         name_of_technician: empName,
-        center_code: centerCode || 'Unassigned',
-        center_name: existing?.center_name || centerName || 'Unassigned',
-        center_location: existing?.center_location || centerLocation || 'Unassigned',
+        center_name: centerName || 'Unassigned',
+        center_location: centerLocation || 'Unassigned',
         attendance_date: istDateStr,
         last_edit_timestamp: currentIstDateTime,
         last_edited_by: req.user!.employee_code,

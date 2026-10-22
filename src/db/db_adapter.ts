@@ -773,7 +773,7 @@ export const db = {
     const empCode = attendance.emp_code_of_thetechnician!;
     const nowIST = getIstDateTimeString();
 
-    // Mandatory Issue 1 resolution: Lookup employee_details for center_name and center_location
+    // Mandatory resolution: Lookup employee_details for master center_name and center_location
     let resolvedCenterName = attendance.center_name;
     let resolvedCenterLocation = attendance.center_location;
     let resolvedTechName = attendance.name_of_technician;
@@ -781,14 +781,14 @@ export const db = {
     try {
       const emp = await db.getEmployeeByCode(empCode, false);
       if (emp) {
-        if (!resolvedCenterName || resolvedCenterName === 'Unassigned') {
-          resolvedCenterName = emp.center_name || emp.center_code || 'Unassigned';
+        if (emp.center_name && emp.center_name.trim()) {
+          resolvedCenterName = emp.center_name.trim();
         }
-        if (!resolvedCenterLocation || resolvedCenterLocation === 'Unassigned') {
-          resolvedCenterLocation = emp.center_location || 'Unassigned';
+        if (emp.center_location && emp.center_location.trim()) {
+          resolvedCenterLocation = emp.center_location.trim();
         }
-        if (!resolvedTechName) {
-          resolvedTechName = emp.employee_name;
+        if (emp.employee_name && emp.employee_name.trim()) {
+          resolvedTechName = emp.employee_name.trim();
         }
       }
     } catch {}
@@ -821,19 +821,34 @@ export const db = {
         const effectiveBreakIn = attendance.intermidiate_off_in_time ? toMysqlDatetime(attendance.intermidiate_off_in_time, dateStr) : existing?.intermidiate_off_in_time;
         const effectiveOutTime = attendance.on_duty_out_time ? toMysqlDatetime(attendance.on_duty_out_time, dateStr) : existing?.on_duty_out_time;
 
-        let totalBreak = attendance.total_break_hrs !== undefined ? Number(attendance.total_break_hrs) : Number(existing?.total_break_hrs || 0);
-        if (effectiveBreakOut && effectiveBreakIn && attendance.total_break_hrs === undefined) {
+        // 1. total_break_hrs = intermidiate_off_in_time - intermidiate_off_out_time
+        let totalBreak = 0.00;
+        if (effectiveBreakOut && effectiveBreakIn) {
           totalBreak = calculateHours(effectiveBreakOut, effectiveBreakIn, dateStr);
-        } else if (!effectiveBreakOut && attendance.total_break_hrs === undefined) {
-          totalBreak = 0.00;
+        } else if (attendance.total_break_hrs !== undefined && attendance.total_break_hrs !== null) {
+          totalBreak = Number(attendance.total_break_hrs);
+        } else if (existing?.total_break_hrs !== undefined && existing?.total_break_hrs !== null) {
+          totalBreak = Number(existing.total_break_hrs);
         }
 
-        let totalWork = attendance.total_working_hrs !== undefined ? Number(attendance.total_working_hrs) : Number(existing?.total_working_hrs || 0);
-        let netEff = attendance.effective_working_hrs !== undefined ? Number(attendance.effective_working_hrs) : Number(existing?.effective_working_hrs || 0);
-
+        // 2. total_working_hrs = on_duty_out_time - on_duty_in_time
+        let totalWork = 0.00;
         if (effectiveInTime && effectiveOutTime) {
           totalWork = calculateHours(effectiveInTime, effectiveOutTime, dateStr);
+        } else if (attendance.total_working_hrs !== undefined && attendance.total_working_hrs !== null) {
+          totalWork = Number(attendance.total_working_hrs);
+        } else if (existing?.total_working_hrs !== undefined && existing?.total_working_hrs !== null) {
+          totalWork = Number(existing.total_working_hrs);
+        }
+
+        // 3. effective_working_hrs = total_working_hrs - total_break_hrs
+        let netEff = 0.00;
+        if (effectiveInTime && effectiveOutTime) {
           netEff = calculateEffectiveHours(totalWork, totalBreak);
+        } else if (attendance.effective_working_hrs !== undefined && attendance.effective_working_hrs !== null) {
+          netEff = Number(attendance.effective_working_hrs);
+        } else if (existing?.effective_working_hrs !== undefined && existing?.effective_working_hrs !== null) {
+          netEff = Number(existing.effective_working_hrs);
         }
 
         if (existing) {
@@ -857,13 +872,14 @@ export const db = {
             updateObj.all_innitial_time = initialTimeVal;
           }
 
+          // Note: preamji_attendance table has center_name and center_location, NOT center_code
           const allowedKeys = [
             'on_duty_in_time', 'on_duty_in_image',
             'intermidiate_off_out_time', 'intermidiate_off_out_image',
             'intermidiate_off_in_time', 'intermidiate_off_in_image',
             'on_duty_out_time', 'on_duty_out_image',
             'total_working_hrs', 'total_break_hrs', 'effective_working_hrs',
-            'center_name', 'center_location', 'center_code',
+            'center_name', 'center_location',
             'all_innitial_time', 'last_edit_timestamp', 'last_edited_by', 'admin_remarks'
           ];
 
@@ -888,15 +904,22 @@ export const db = {
               return result.affectedRows > 0;
             } catch (updateErr: any) {
               console.warn('MySQL update failed with full fields, attempting safe update:', updateErr?.message);
-              // Fallback to core columns if some columns are missing
+              // Fallback with complete core business fields
               const safeFields = [
                 'on_duty_in_time', 'on_duty_in_image',
                 'intermidiate_off_out_time', 'intermidiate_off_out_image',
                 'intermidiate_off_in_time', 'intermidiate_off_in_image',
                 'on_duty_out_time', 'on_duty_out_image',
-                'center_name', 'last_edit_timestamp', 'last_edited_by'
+                'total_working_hrs', 'total_break_hrs', 'effective_working_hrs',
+                'center_name', 'center_location', 'last_edit_timestamp', 'last_edited_by'
               ].filter(k => updateObj[k] !== undefined);
-              const safeVals = safeFields.map(k => updateObj[k]);
+              const safeVals = safeFields.map(k => {
+                let v = updateObj[k];
+                if (k.endsWith('_time') || k === 'last_edit_timestamp') {
+                  v = toMysqlDatetime(v, dateStr);
+                }
+                return v;
+              });
               safeVals.push(existing.id);
               const [res2]: any = await executeWithRetry(
                 `UPDATE preamji_attendance SET ${safeFields.map(f => `${f} = ?`).join(', ')} WHERE id = ?`,
@@ -916,16 +939,15 @@ export const db = {
           try {
             const [result]: any = await executeWithRetry(
               `INSERT INTO preamji_attendance 
-              (emp_code_of_thetechnician, name_of_technician, center_code, center_name, center_location, attendance_date,
+              (emp_code_of_thetechnician, name_of_technician, center_name, center_location, attendance_date,
                on_duty_in_time, on_duty_in_image, intermidiate_off_out_time, intermidiate_off_out_image,
                intermidiate_off_in_time, intermidiate_off_in_image, on_duty_out_time, on_duty_out_image,
                total_working_hrs, total_break_hrs, effective_working_hrs, all_innitial_time,
                last_edit_timestamp, last_edited_by, admin_remarks)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 empCode,
                 resolvedTechName,
-                attendance.center_code || 'Unassigned',
                 resolvedCenterName,
                 resolvedCenterLocation,
                 dateStr,
@@ -951,14 +973,17 @@ export const db = {
             console.warn('Full insert failed, falling back to standard columns:', insertErr?.message);
             const [fallbackResult]: any = await executeWithRetry(
               `INSERT INTO preamji_attendance 
-              (emp_code_of_thetechnician, name_of_technician, center_name, attendance_date,
+              (emp_code_of_thetechnician, name_of_technician, center_name, center_location, attendance_date,
                on_duty_in_time, on_duty_in_image, intermidiate_off_out_time, intermidiate_off_out_image,
-               intermidiate_off_in_time, intermidiate_off_in_image, on_duty_out_time, on_duty_out_image)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               intermidiate_off_in_time, intermidiate_off_in_image, on_duty_out_time, on_duty_out_image,
+               total_working_hrs, total_break_hrs, effective_working_hrs, all_innitial_time,
+               last_edit_timestamp, last_edited_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 empCode,
                 resolvedTechName,
                 resolvedCenterName,
+                resolvedCenterLocation,
                 dateStr,
                 onDutyInTime,
                 attendance.on_duty_in_image || null,
@@ -967,7 +992,13 @@ export const db = {
                 intermidiateOffInTime,
                 attendance.intermidiate_off_in_image || null,
                 onDutyOutTime,
-                attendance.on_duty_out_image || null
+                attendance.on_duty_out_image || null,
+                totalWork,
+                totalBreak,
+                netEff,
+                initialTimeVal || onDutyInTime,
+                nowIST,
+                actingUser
               ]
             );
             return fallbackResult.insertId > 0;
