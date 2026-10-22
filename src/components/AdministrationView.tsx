@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Users, Building, Plus, Search, Download, CheckCircle, RefreshCw, Edit, ShieldAlert, Eye, EyeOff, Calendar, FileText } from 'lucide-react';
+import { Settings, Users, Building, Plus, Search, Download, CheckCircle, RefreshCw, Edit, ShieldAlert, Eye, EyeOff, Calendar, FileText, Clock, Check, Info } from 'lucide-react';
 import { authFetch } from '../utils/api';
+import { format24To12HourDisplay } from '../lib/ist-time';
 
 interface AdministrationViewProps {
   user: any;
   centers: any[];
-  initialTab?: 'users' | 'centers';
+  initialTab?: 'users' | 'centers' | 'settings';
   onNotification: (message: string, type: 'success' | 'error' | 'info') => void;
   onRefreshCenters: () => void;
 }
@@ -18,9 +19,15 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   onRefreshCenters
 }) => {
   const isSuperAdmin = user.user_role === 'Super Admin';
-  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'centers'>(initialTab);
+  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'centers' | 'settings'>(initialTab);
   const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Attendance settings state
+  const [breakCutoffTime, setBreakCutoffTime] = useState('16:00');
+  const [lastSavedCutoff, setLastSavedCutoff] = useState('16:00');
+  const [loadingSettings, setLoadingSettings] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   // User search/edit state
   const [userSearch, setUserSearch] = useState('');
@@ -81,8 +88,54 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
     }
   };
 
+  const loadAttendanceSettings = async () => {
+    try {
+      setLoadingSettings(true);
+      const res = await authFetch('/api/settings/attendance');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.break_cutoff_time) {
+          setBreakCutoffTime(data.break_cutoff_time);
+          setLastSavedCutoff(data.break_cutoff_time);
+        }
+      }
+    } catch (e) {
+      console.error('Error loading attendance settings:', e);
+    } finally {
+      setLoadingSettings(false);
+    }
+  };
+
+  const handleSaveAttendanceSettings = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!isSuperAdmin) {
+      onNotification('Only Super Admin can modify attendance settings', 'error');
+      return;
+    }
+    try {
+      setSavingSettings(true);
+      const res = await authFetch('/api/settings/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ break_cutoff_time: breakCutoffTime })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setLastSavedCutoff(data.break_cutoff_time);
+        onNotification(data.message || 'Attendance break cutoff updated successfully!', 'success');
+      } else {
+        onNotification(data.error || 'Failed to update attendance settings', 'error');
+      }
+    } catch (err) {
+      onNotification('Network error saving attendance settings', 'error');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   useEffect(() => {
     loadEmployees();
+    loadAttendanceSettings();
   }, []);
 
   // When selected center changes for edit
@@ -301,6 +354,15 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           >
             <Building className="w-4 h-4" />
             Manage Centers
+          </button>
+          <button
+            onClick={() => setActiveAdminTab('settings')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+              activeAdminTab === 'settings' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            Attendance Settings
           </button>
         </div>
       </div>
@@ -841,7 +903,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {centers.map((c) => (
+                {centers.filter((c) => c.status !== 'System').map((c) => (
                   <tr key={c.center_code} className="hover:bg-slate-50 transition">
                     <td className="p-3 font-mono font-bold text-sky-700">{c.center_code}</td>
                     <td className="p-3 font-semibold text-slate-800">{c.center_name}</td>
@@ -856,6 +918,195 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ================= TAB 3: ATTENDANCE & SHIFT SETTINGS ================= */}
+      {activeAdminTab === 'settings' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="p-6 bg-gradient-to-r from-sky-50 via-indigo-50 to-purple-50 border border-sky-200/80 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm text-2xl border border-sky-100 shrink-0">
+                ⏰
+              </span>
+              <div>
+                <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <span>Attendance &amp; Break Rules Configuration</span>
+                </h3>
+                <p className="text-xs text-slate-600 mt-1 max-w-xl leading-relaxed">
+                  Configure dynamic cutoff policies for employee daily shifts. Employees who do not go out for lunch or tea breaks by this cutoff time are automatically transitioned directly to Checkpoint 4 (Duty Out) with zero break hours.
+                </p>
+              </div>
+            </div>
+
+            <div className="shrink-0">
+              {isSuperAdmin ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                  <Check className="h-3.5 w-3.5" />
+                  Super Admin (Edit Access)
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs">
+                  <ShieldAlert className="h-3.5 w-3.5" />
+                  Read-Only (Super Admin Required)
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Main Setting Card */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-7 p-6 bg-white border border-slate-200/90 rounded-2xl shadow-sm space-y-6">
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-sky-600" />
+                    <span>Break Skip Cutoff Threshold</span>
+                  </label>
+                  <span className="font-mono text-xs font-bold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-200">
+                    Active: {format24To12HourDisplay(lastSavedCutoff)} ({lastSavedCutoff})
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                  If an employee has recorded their morning check-in and has <strong>not</strong> taken a break by this time, the camera view will immediately skip Break Out / Return and show only <strong>Option 4: Mark On Duty Out (Shift End)</strong>.
+                </p>
+              </div>
+
+              {/* Time Input & Presets */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Cutoff Time (24-Hour / IST):
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="time"
+                      value={breakCutoffTime}
+                      disabled={!isSuperAdmin || savingSettings || loadingSettings}
+                      onChange={(e) => setBreakCutoffTime(e.target.value)}
+                      className="px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-base font-bold text-slate-800 focus:outline-none focus:border-sky-500 disabled:opacity-60 disabled:cursor-not-allowed shadow-inner"
+                    />
+                    <div className="text-sm font-black text-slate-700 font-mono">
+                      = {format24To12HourDisplay(breakCutoffTime)} IST
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Quick Preset Times:
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { label: '02:00 PM', value: '14:00' },
+                      { label: '03:00 PM', value: '15:00' },
+                      { label: '03:30 PM', value: '15:30' },
+                      { label: '04:00 PM (Default)', value: '16:00' },
+                      { label: '04:30 PM', value: '16:30' },
+                      { label: '05:00 PM', value: '17:00' }
+                    ].map((p) => (
+                      <button
+                        key={p.value}
+                        type="button"
+                        disabled={!isSuperAdmin || savingSettings}
+                        onClick={() => setBreakCutoffTime(p.value)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                          breakCutoffTime === p.value
+                            ? 'bg-sky-600 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Save Action */}
+                {isSuperAdmin && (
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <button
+                      type="button"
+                      disabled={savingSettings || loadingSettings || breakCutoffTime === lastSavedCutoff}
+                      onClick={handleSaveAttendanceSettings}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white rounded-xl font-bold text-xs shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {savingSettings ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          <span>Saving Changes...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="h-4 w-4" />
+                          <span>Save Attendance Rule</span>
+                        </>
+                      )}
+                    </button>
+
+                    {breakCutoffTime !== lastSavedCutoff && (
+                      <span className="text-[11px] font-bold text-amber-600 animate-pulse">
+                        ● Unsaved Changes
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Explanatory Policy & Calculation Card */}
+            <div className="lg:col-span-5 p-6 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <Info className="h-4 w-4 text-sky-600" />
+                <span>How This Rule Works in Attendance Capture</span>
+              </h4>
+
+              <div className="space-y-3 text-xs text-slate-600">
+                <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
+                  <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    Checkpoint 1: Morning Check-In
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Employee records arrival (On Duty In). Shift begins and total break initializes to 0.00 hrs.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
+                  <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-amber-500" />
+                    Before Cutoff ({format24To12HourDisplay(lastSavedCutoff)})
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Option 2 (Break Out) remains available. If taken, employee records Break Departure and Return.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-sky-200 shadow-2xs bg-sky-50/40">
+                  <div className="font-bold text-sky-900 flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-purple-500" />
+                    At or After Cutoff (No Break Taken)
+                  </div>
+                  <p className="mt-1 text-[11px] text-sky-800">
+                    Options 2 and 3 are automatically bypassed. The camera only displays <strong>Option 4 (Mark On Duty Out)</strong>.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-emerald-50/70 rounded-xl border border-emerald-200 shadow-2xs">
+                  <div className="font-bold text-emerald-900 flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-600" />
+                    Hour Calculation Guarantee
+                  </div>
+                  <p className="mt-1 text-[11px] text-emerald-800">
+                    Total Break Hours = <strong>0.00 hrs</strong>.<br />
+                    Effective Working Hours = <strong>Gross Working Hours</strong>.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

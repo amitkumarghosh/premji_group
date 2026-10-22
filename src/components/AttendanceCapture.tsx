@@ -21,6 +21,7 @@ export const AttendanceCapture: React.FC<AttendanceCaptureProps> = ({
   const activeEmployee = targetEmployee || user;
   const [todayAttendance, setTodayAttendance] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [breakCutoffTime, setBreakCutoffTime] = useState<string>('16:00');
   const [loading, setLoading] = useState(true);
 
   // Fetch today's attendance and history
@@ -39,6 +40,9 @@ export const AttendanceCapture: React.FC<AttendanceCaptureProps> = ({
       if (todayRes.ok) {
         const data = await todayRes.json();
         setTodayAttendance(data.attendance);
+        if (data.break_cutoff_time) {
+          setBreakCutoffTime(data.break_cutoff_time);
+        }
       }
 
       if (historyRes.ok) {
@@ -114,6 +118,7 @@ export const AttendanceCapture: React.FC<AttendanceCaptureProps> = ({
         user={user}
         targetEmployee={targetEmployee}
         todayAttendance={todayAttendance}
+        breakCutoffTime={breakCutoffTime}
         onPunchSuccess={handlePunchSuccess}
         onNotification={onNotification}
       />

@@ -226,7 +226,23 @@ def attendance_page(user):
     if not record["on_duty_in_time"]:
         next_action = "On Duty In"
     elif not record["intermidiate_off_out_time"]:
-        next_action = "Break Out"
+        # If employee has not gone for break by cutoff time (default 4pm / 16:00), skip directly to On Duty Out
+        current_hour_min = (current_time.hour, current_time.minute)
+        cutoff_hm = (16, 0)
+        try:
+            with get_db_engine().connect() as conn:
+                setting_row = conn.execute(text("SELECT center_name FROM center_details WHERE center_code='SYS_BREAK_CUTOFF' LIMIT 1")).fetchone()
+                if setting_row and setting_row[0]:
+                    parts = str(setting_row[0]).split(":")
+                    cutoff_hm = (int(parts[0]), int(parts[1]))
+        except Exception:
+            pass
+        if current_hour_min >= cutoff_hm:
+            next_action = "On Duty Out"
+            if record["on_duty_out_time"]:
+                is_repunch = True
+        else:
+            next_action = "Break Out"
     elif not record["intermidiate_off_in_time"]:
         next_action = "Break In"
     else:

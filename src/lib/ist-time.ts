@@ -190,3 +190,40 @@ export function formatIstFullDisplay(val: string | Date | null | undefined): str
     minute: '2-digit'
   });
 }
+
+/**
+ * Checks whether current IST time is at or past a cutoff time in HH:mm (or HH:mm:ss) format.
+ * Defaults to '16:00' (4:00 PM IST).
+ */
+export function isCurrentTimePastCutoff(cutoffTime: string = '16:00', referenceDate: Date = new Date()): boolean {
+  try {
+    const timeStr = getIstTimeString(referenceDate, '24h');
+    const [nowH, nowM] = timeStr.split(':').map(Number);
+    const [cutH, cutM] = (cutoffTime || '16:00').split(':').map(Number);
+
+    if (isNaN(cutH)) return false;
+    const cutoffMinutes = cutH * 60 + (isNaN(cutM) ? 0 : cutM);
+    const currentMinutes = (isNaN(nowH) ? 0 : nowH) * 60 + (isNaN(nowM) ? 0 : nowM);
+
+    return currentMinutes >= cutoffMinutes;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Formats a 24-hour time string (e.g. "16:00" or "09:30") to 12-hour display with AM/PM (e.g. "04:00 PM")
+ */
+export function format24To12HourDisplay(time24: string): string {
+  if (!time24) return '04:00 PM';
+  const parts = time24.split(':');
+  let h = parseInt(parts[0], 10);
+  const m = (parts[1] || '00').padStart(2, '0');
+  if (isNaN(h)) return '04:00 PM';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12;
+  h = h ? h : 12;
+  const hStr = h < 10 ? `0${h}` : `${h}`;
+  return `${hStr}:${m} ${ampm}`;
+}
+

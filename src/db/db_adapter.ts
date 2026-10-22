@@ -304,6 +304,22 @@ export async function initDatabase() {
       } catch (colErr) {
         attendanceTableHasCenterCode = false;
       }
+
+      // Auto-verify / seed default Break Cutoff Time (16:00) if not present
+      try {
+        const [settingRows]: any = await conn.execute(
+          'SELECT center_name FROM center_details WHERE center_code = "SYS_BREAK_CUTOFF" LIMIT 1'
+        );
+        if (!settingRows || settingRows.length === 0) {
+          await conn.execute(
+            'INSERT INTO center_details (center_code, center_name, center_location, center_type, status) VALUES ("SYS_BREAK_CUTOFF", "16:00", "Break Cutoff Time (24h HH:mm)", "SETTINGS", "System")'
+          );
+          console.log('✅ Initialized SYS_BREAK_CUTOFF setting (16:00)');
+        }
+      } catch (seedErr: any) {
+        // Non-blocking
+      }
+
       conn.release();
       useLocalDb = false;
 
@@ -808,6 +824,8 @@ export const db = {
         let totalBreak = attendance.total_break_hrs !== undefined ? Number(attendance.total_break_hrs) : Number(existing?.total_break_hrs || 0);
         if (effectiveBreakOut && effectiveBreakIn && attendance.total_break_hrs === undefined) {
           totalBreak = calculateHours(effectiveBreakOut, effectiveBreakIn, dateStr);
+        } else if (!effectiveBreakOut && attendance.total_break_hrs === undefined) {
+          totalBreak = 0.00;
         }
 
         let totalWork = attendance.total_working_hrs !== undefined ? Number(attendance.total_working_hrs) : Number(existing?.total_working_hrs || 0);
@@ -980,6 +998,8 @@ export const db = {
       let totalBreak = attendance.total_break_hrs !== undefined ? Number(attendance.total_break_hrs) : Number(existing.total_break_hrs || 0);
       if (effBreakOut && effBreakIn && attendance.total_break_hrs === undefined) {
         totalBreak = calculateHours(effBreakOut, effBreakIn, dateStr);
+      } else if (!effBreakOut && attendance.total_break_hrs === undefined) {
+        totalBreak = 0.00;
       }
 
       let totalWork = attendance.total_working_hrs !== undefined ? Number(attendance.total_working_hrs) : Number(existing.total_working_hrs || 0);
@@ -2290,5 +2310,72 @@ export const db = {
       deletedRecords: count,
       deletedFiles
     };
+  },
+
+  // 10. System Configuration & Attendance Rules
+  async getSystemSetting(key: string, defaultValue: string = '16:00'): Promise<string> {
+    const settingCode = key.startsWith('SYS_') ? key : `SYS_${key.toUpperCase()}`;
+    if (!useLocalDb && mysqlPool) {
+      try {
+        const [rows]: any = await executeWithRetry(
+          'SELECT center_name FROM center_details WHERE center_code = ? LIMIT 1',
+          [settingCode]
+        );
+        if (rows && rows.length > 0 && rows[0].center_name) {
+          return rows[0].center_name;
+        }
+      } catch (err: any) {
+        console.warn(`[getSystemSetting Error] Failed to read ${key}:`, err?.message || err);
+      }
+    }
+    const store = readLocalDb();
+    const found = (store.center_details || []).find((c: any) => c.center_code === settingCode);
+    return found?.center_name || defaultValue;
+  },
+
+  async setSystemSetting(key: string, value: string, description: string = 'System Setting'): Promise<boolean> {
+    const settingCode = key.startsWith('SYS_') ? key : `SYS_${key.toUpperCase()}`;
+    if (!useLocalDb && mysqlPool) {
+      try {
+        const [rows]: any = await executeWithRetry(
+          'SELECT id FROM center_details WHERE center_code = ? LIMIT 1',
+          [settingCode]
+        );
+        if (rows && rows.length > 0) {
+          await executeWithRetry(
+            'UPDATE center_details SET center_name = ?, center_location = ?, status = "System" WHERE center_code = ?',
+            [value, description, settingCode]
+          );
+        } else {
+          await executeWithRetry(
+            'INSERT INTO center_details (center_code, center_name, center_location, center_type, status) VALUES (?, ?, ?, "SETTINGS", "System")',
+            [settingCode, value, description]
+          );
+        }
+        return true;
+      } catch (err: any) {
+        console.error(`[setSystemSetting Error] Failed to write ${key}:`, err?.message || err);
+        return false;
+      }
+    }
+    const store = readLocalDb();
+    if (!store.center_details) store.center_details = [];
+    const idx = store.center_details.findIndex((c: any) => c.center_code === settingCode);
+    if (idx >= 0) {
+      store.center_details[idx].center_name = value;
+      store.center_details[idx].center_location = description;
+      store.center_details[idx].status = 'System';
+    } else {
+      store.center_details.push({
+        id: Date.now(),
+        center_code: settingCode,
+        center_name: value,
+        center_location: description,
+        center_type: 'SETTINGS',
+        status: 'System'
+      });
+    }
+    writeLocalDb(store);
+    return true;
   }
 };

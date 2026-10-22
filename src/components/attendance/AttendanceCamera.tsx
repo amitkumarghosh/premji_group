@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera, RefreshCw, RotateCw, AlertTriangle, Clock, CheckCircle2, Sparkles } from 'lucide-react';
-import { formatIstTimeDisplay, getIstTimeString, getIstDateString } from '../../lib/ist-time.ts';
+import { formatIstTimeDisplay, getIstTimeString, getIstDateString, isCurrentTimePastCutoff, format24To12HourDisplay } from '../../lib/ist-time.ts';
 
 export type AttendanceCheckpoint =
   | 'on_duty_in'
@@ -17,6 +17,7 @@ interface AttendanceCameraProps {
   };
   todayAttendance: any | null;
   targetEmployee?: any | null;
+  breakCutoffTime?: string;
   onPunchSuccess: (result: any) => void;
   onNotification: (message: string, type: 'success' | 'error' | 'info') => void;
 }
@@ -25,6 +26,7 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
   user,
   todayAttendance,
   targetEmployee,
+  breakCutoffTime = '16:00',
   onPunchSuccess,
   onNotification
 }) => {
@@ -36,15 +38,17 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
   const [capturing, setCapturing] = useState(false);
   const [flashActive, setFlashActive] = useState(false);
 
-  // Live IST Clock
+  // Live IST Clock & Timestamp
   const [istClock, setIstClock] = useState('');
   const [istDateStr, setIstDateStr] = useState('');
+  const [nowDate, setNowDate] = useState<Date>(new Date());
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
+      setNowDate(now);
       setIstClock(getIstTimeString(now, '12h'));
       setIstDateStr(now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'full' }));
     };
@@ -58,9 +62,17 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
     if (!todayAttendance || !todayAttendance.on_duty_in_time) {
       return 'on_duty_in';
     }
+    // Check if employee has gone for break
     if (!todayAttendance.intermidiate_off_out_time) {
+      // If employee did not go for break until cutoff time (default 4pm / 16:00),
+      // transition directly to option 4: On Duty Out!
+      const pastCutoff = isCurrentTimePastCutoff(breakCutoffTime, nowDate);
+      if (pastCutoff) {
+        return 'on_duty_out';
+      }
       return 'intermidiate_off_out';
     }
+    // Employee went for break, awaiting return
     if (!todayAttendance.intermidiate_off_in_time) {
       return 'intermidiate_off_in';
     }
@@ -72,6 +84,12 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
   const isRePunch = !!(
     todayAttendance?.on_duty_out_time &&
     currentCheckpoint === 'on_duty_out'
+  );
+  const isDirectDutyOutActive = !!(
+    todayAttendance?.on_duty_in_time &&
+    !todayAttendance?.intermidiate_off_out_time &&
+    currentCheckpoint === 'on_duty_out' &&
+    !todayAttendance?.on_duty_out_time
   );
 
   // Dynamic button labels
@@ -461,8 +479,17 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
           )}
         </div>
 
-        {/* Compact Punch Action Button (Bit smaller size per user request) */}
+        {/* Compact Punch Action Button */}
         <div className="mt-3.5 space-y-1.5">
+          {isDirectDutyOutActive && (
+            <div className="flex items-center gap-2 rounded-xl bg-purple-50/90 border border-purple-200/80 p-2.5 text-left text-xs text-purple-900 shadow-2xs">
+              <Clock className="h-4 w-4 text-purple-600 shrink-0" />
+              <p className="leading-tight text-[11px]">
+                <strong>Direct Shift End Active:</strong> Break was not taken by {format24To12HourDisplay(breakCutoffTime)}. Option 4 (Duty Out) is enabled directly with <strong>0.00 hrs break</strong>.
+              </p>
+            </div>
+          )}
+
           <button
             type="button"
             disabled={capturing || !!cameraError}
@@ -493,6 +520,12 @@ export const AttendanceCamera: React.FC<AttendanceCameraProps> = ({
           {isRePunch && (
             <p className="text-center text-[10px] font-medium text-amber-700 bg-amber-50/80 rounded-lg py-1 px-2.5 border border-amber-200/60">
               💡 Re-punching updates checkout photo & time, automatically recalculating shift hours.
+            </p>
+          )}
+
+          {currentCheckpoint === 'intermidiate_off_out' && (
+            <p className="text-center text-[10px] text-slate-500 font-medium pt-0.5">
+              💡 If no break is taken by {format24To12HourDisplay(breakCutoffTime)}, option 4 (Duty Out) will activate automatically.
             </p>
           )}
         </div>

@@ -176,6 +176,7 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {checkpoints.map((cp) => {
             const isRecorded = !!cp.time;
+            const isBreakSkipped = (cp.key === 'intermidiate_off_out' || cp.key === 'intermidiate_off_in') && !cp.time && !!attendance.on_duty_out_time;
             const timeDisplay = formatIstTimeDisplay(cp.time);
 
             return (
@@ -184,6 +185,8 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
                 className={`relative p-5 rounded-2xl border transition-all ${
                   isRecorded
                     ? `${cp.borderColor} ${cp.bgColor} shadow-sm`
+                    : isBreakSkipped
+                    ? 'border-slate-200 bg-slate-50/80'
                     : 'border-slate-200 bg-slate-50/60 opacity-60'
                 }`}
               >
@@ -193,6 +196,10 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                       <Check className="h-3 w-3" />
                       <span>Recorded</span>
+                    </span>
+                  ) : isBreakSkipped ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-300">
+                      <span>Not Taken (0h)</span>
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500">
@@ -207,8 +214,8 @@ export const DailyAttendanceSummary: React.FC<DailyAttendanceSummaryProps> = ({
 
                 <div className="mt-3 pt-3 border-t border-slate-200/60 flex items-center justify-between">
                   <span className="text-[10px] uppercase font-bold text-slate-400">IST Time</span>
-                  <span className={`font-mono text-sm font-black ${isRecorded ? cp.textColor : 'text-slate-400'}`}>
-                    {timeDisplay}
+                  <span className={`font-mono text-sm font-black ${isRecorded ? cp.textColor : isBreakSkipped ? 'text-slate-400' : 'text-slate-400'}`}>
+                    {isRecorded ? timeDisplay : isBreakSkipped ? '— (0.00h)' : '—'}
                   </span>
                 </div>
               </div>

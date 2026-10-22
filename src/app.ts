@@ -17,7 +17,8 @@ import {
   getIstTimeString,
   calculateHours,
   calculateEffectiveHours,
-  formatIstTimeDisplay
+  formatIstTimeDisplay,
+  format24To12HourDisplay
 } from './lib/ist-time.ts';
 
 // ES modules compatibility
@@ -226,11 +227,14 @@ export async function createExpressApp() {
       const todayIST = getIstDateString();
       const attendance = await db.getTodayAttendance(empCode, todayIST);
       const emp = await db.getEmployeeByCode(empCode, false);
+      const breakCutoffTime = await db.getSystemSetting('break_cutoff_time', '16:00');
 
       return res.json({
         success: true,
         today_date: todayIST,
         attendance: attendance || null,
+        break_cutoff_time: breakCutoffTime || '16:00',
+        break_cutoff_display: format24To12HourDisplay(breakCutoffTime || '16:00'),
         employee: emp ? {
           employee_code: emp.employee_code,
           employee_name: emp.employee_name,
@@ -357,6 +361,9 @@ export async function createExpressApp() {
         let breakDuration = 0.00;
         if (existing?.intermidiate_off_out_time && existing?.intermidiate_off_in_time) {
           breakDuration = calculateHours(existing.intermidiate_off_out_time, existing.intermidiate_off_in_time, istDateStr);
+        } else if (!existing?.intermidiate_off_out_time) {
+          // Employee did not go for break: total_break_hrs is strictly 0.00
+          breakDuration = 0.00;
         } else if (existing?.total_break_hrs) {
           breakDuration = Number(existing.total_break_hrs);
         }
@@ -407,8 +414,14 @@ export async function createExpressApp() {
 
       const istDateStr = getIstDateString();
       const att = await db.getTodayAttendance(empCode, istDateStr);
+      const breakCutoffTime = await db.getSystemSetting('break_cutoff_time', '16:00');
 
-      return res.json({ attendance: att, todayDate: istDateStr });
+      return res.json({
+        attendance: att,
+        todayDate: istDateStr,
+        break_cutoff_time: breakCutoffTime || '16:00',
+        break_cutoff_display: format24To12HourDisplay(breakCutoffTime || '16:00')
+      });
     } catch (err) {
       console.error('Error fetching today attendance:', err);
       return res.status(500).json({ error: 'Failed to retrieve today\'s attendance status' });
@@ -1330,6 +1343,61 @@ export async function createExpressApp() {
     } catch (err) {
       console.error('Center update error:', err);
       return res.status(500).json({ error: 'Failed to update center' });
+    }
+  });
+
+  // ==================== SYSTEM SETTINGS & ATTENDANCE RULES API ====================
+
+  app.get('/api/settings/attendance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const breakCutoff = await db.getSystemSetting('break_cutoff_time', '16:00');
+      return res.json({
+        success: true,
+        break_cutoff_time: breakCutoff || '16:00',
+        break_cutoff_display: format24To12HourDisplay(breakCutoff || '16:00'),
+        can_edit: req.user?.user_role === 'Super Admin'
+      });
+    } catch (err: any) {
+      console.error('Error fetching attendance settings:', err);
+      return res.status(500).json({ error: 'Failed to fetch attendance settings' });
+    }
+  });
+
+  app.post(['/api/settings/attendance', '/api/settings'], requireAuth, requireRole(['Super Admin']), async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { break_cutoff_time } = req.body;
+      if (!break_cutoff_time || typeof break_cutoff_time !== 'string') {
+        return res.status(400).json({ error: 'Valid break cutoff time is required (e.g. 16:00)' });
+      }
+
+      const cleanTime = break_cutoff_time.trim();
+      const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
+      if (!timeRegex.test(cleanTime)) {
+        return res.status(400).json({ error: 'Invalid time format. Please provide time as HH:mm (e.g., 16:00 or 15:30).' });
+      }
+
+      const normalizedTime = cleanTime.substring(0, 5);
+
+      const success = await db.setSystemSetting(
+        'break_cutoff_time',
+        normalizedTime,
+        `Break Cutoff Time configured by ${req.user!.employee_name || 'Admin'} (${req.user!.employee_code})`
+      );
+
+      if (!success) {
+        return res.status(500).json({ error: 'Failed to save attendance setting to database' });
+      }
+
+      const displayTime = format24To12HourDisplay(normalizedTime);
+      return res.json({
+        success: true,
+        message: `Break cutoff time updated to ${displayTime} (${normalizedTime}) successfully!`,
+        break_cutoff_time: normalizedTime,
+        break_cutoff_display: displayTime
+      });
+    } catch (err: any) {
+      console.error('Error updating attendance settings:', err);
+      return res.status(500).json({ error: 'Failed to update attendance settings' });
     }
   });
 
