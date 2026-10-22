@@ -16,11 +16,11 @@ def get_engine() -> Engine:
         secrets = toml.load(secrets_path)
     
     mysql_cfg = secrets.get("mysql", {})
-    host = mysql_cfg.get("host", "srv1044851.hstgr.cloud")
-    database = mysql_cfg.get("database", "premji_group")
-    user = mysql_cfg.get("user", "premji")
-    password = mysql_cfg.get("password", "$Trong_Passw0rd")
-    port = mysql_cfg.get("port", 3306)
+    host = mysql_cfg.get("host") or os.getenv("MYSQL_HOST", "srv1044851.hstgr.cloud")
+    database = mysql_cfg.get("database") or os.getenv("MYSQL_DATABASE", "premji_group")
+    user = mysql_cfg.get("user") or os.getenv("MYSQL_USER", "premji")
+    password = mysql_cfg.get("password") or os.getenv("MYSQL_PASSWORD", "")
+    port = int(mysql_cfg.get("port") or os.getenv("MYSQL_PORT", 3306))
 
     import urllib.parse
     conn_url = f"mysql+pymysql://{urllib.parse.quote_plus(user)}:{urllib.parse.quote_plus(password)}@{host}:{port}/{database}"

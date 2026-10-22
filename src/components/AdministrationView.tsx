@@ -18,8 +18,15 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   onNotification,
   onRefreshCenters
 }) => {
-  const isSuperAdmin = user.user_role === 'Super Admin';
-  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'centers' | 'settings'>(initialTab);
+  const isSuperAdmin = user?.user_role === 'Super Admin';
+  const effectiveInitialTab = (initialTab === 'settings' && !isSuperAdmin) ? 'users' : initialTab;
+  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'centers' | 'settings'>(effectiveInitialTab);
+
+  useEffect(() => {
+    if (!isSuperAdmin && activeAdminTab === 'settings') {
+      setActiveAdminTab('users');
+    }
+  }, [isSuperAdmin, activeAdminTab]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -135,8 +142,10 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
 
   useEffect(() => {
     loadEmployees();
-    loadAttendanceSettings();
-  }, []);
+    if (isSuperAdmin) {
+      loadAttendanceSettings();
+    }
+  }, [isSuperAdmin]);
 
   // When selected center changes for edit
   useEffect(() => {
@@ -355,15 +364,17 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
             <Building className="w-4 h-4" />
             Manage Centers
           </button>
-          <button
-            onClick={() => setActiveAdminTab('settings')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeAdminTab === 'settings' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Clock className="w-4 h-4" />
-            Attendance Settings
-          </button>
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveAdminTab('settings')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                activeAdminTab === 'settings' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              Attendance Settings
+            </button>
+          )}
         </div>
       </div>
 
@@ -922,8 +933,8 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
         </div>
       )}
 
-      {/* ================= TAB 3: ATTENDANCE & SHIFT SETTINGS ================= */}
-      {activeAdminTab === 'settings' && (
+      {/* ================= TAB 3: ATTENDANCE & SHIFT SETTINGS (SUPER ADMIN ONLY) ================= */}
+      {activeAdminTab === 'settings' && isSuperAdmin && (
         <div className="space-y-6">
           {/* Header Banner */}
           <div className="p-6 bg-gradient-to-r from-sky-50 via-indigo-50 to-purple-50 border border-sky-200/80 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">

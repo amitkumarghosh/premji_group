@@ -2,25 +2,17 @@ import Client from 'ssh2-sftp-client';
 import fs from 'fs';
 import path from 'path';
 
-const DEFAULT_SFTP = {
-  host: '72.60.202.149',
-  port: 22,
-  username: 'tools',
-  password: 'NatDhul#2025',
-  remoteBase: '/var/www/premji'
-};
-
 const SFTP_CONFIG: Client.ConnectOptions = {
-  host: process.env.SFTP_HOST || DEFAULT_SFTP.host,
-  port: Number(process.env.SFTP_PORT || DEFAULT_SFTP.port),
-  username: process.env.SFTP_USER || DEFAULT_SFTP.username,
-  password: process.env.SFTP_PASSWORD || DEFAULT_SFTP.password,
+  host: process.env.SFTP_HOST,
+  port: Number(process.env.SFTP_PORT || 22),
+  username: process.env.SFTP_USER,
+  password: process.env.SFTP_PASSWORD,
   readyTimeout: 10000,
   retries: 3,
   retry_minTimeout: 500
 };
 
-const REMOTE_BASE_DIR = process.env.SFTP_REMOTE_BASE || DEFAULT_SFTP.remoteBase;
+const REMOTE_BASE_DIR = process.env.SFTP_REMOTE_BASE || '/var/www/premji';
 const LOCAL_UPLOADS_DIR = path.resolve(process.cwd(), 'data', 'uploads');
 const TMP_UPLOADS_DIR = path.join('/tmp', 'premji_uploads');
 
@@ -42,9 +34,9 @@ const missingFilesCache = new Set<string>();
 // Helper to check SFTP config
 const hasSftpConfig = () => {
   return !!(
-    (process.env.SFTP_HOST || DEFAULT_SFTP.host) &&
-    (process.env.SFTP_USER || DEFAULT_SFTP.username) &&
-    (process.env.SFTP_PASSWORD || process.env.SFTP_KEY || DEFAULT_SFTP.password)
+    process.env.SFTP_HOST &&
+    process.env.SFTP_USER &&
+    (process.env.SFTP_PASSWORD || process.env.SFTP_KEY)
   );
 };
 

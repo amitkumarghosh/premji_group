@@ -1349,7 +1349,7 @@ export async function createExpressApp() {
 
   // ==================== SYSTEM SETTINGS & ATTENDANCE RULES API ====================
 
-  app.get('/api/settings/attendance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  app.get('/api/settings/attendance', requireAuth, requireRole(['Super Admin']), async (req: AuthenticatedRequest, res: Response) => {
     try {
       const breakCutoff = await db.getSystemSetting('break_cutoff_time', '16:00');
       return res.json({

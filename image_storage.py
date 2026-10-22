@@ -8,24 +8,33 @@ from datetime import datetime
 import streamlit as st
 
 def get_sftp_config():
+    host = os.getenv("SFTP_HOST", "72.60.202.149")
+    port = int(os.getenv("SFTP_PORT", "22"))
+    username = os.getenv("SFTP_USER", "tools")
+    password = os.getenv("SFTP_PASSWORD", "")
+    remote_base_dir = os.getenv("SFTP_REMOTE_BASE", "/var/www/premji")
+    public_url_base = os.getenv("NEXT_PUBLIC_CDN_BASE", "http://72.60.202.149/premji")
+
     secrets_path = os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml")
     if os.path.exists(secrets_path):
-        sec = toml.load(secrets_path).get("sftp", {})
-        return {
-            "host": sec.get("host", "72.60.202.149"),
-            "port": sec.get("port", 22),
-            "username": sec.get("username", "tools"),
-            "password": sec.get("password", "NatDhul#2025"),
-            "remote_base_dir": sec.get("remote_base_dir", "/var/www/premji"),
-            "public_url_base": sec.get("public_url_base", "http://72.60.202.149/premji")
-        }
+        try:
+            sec = toml.load(secrets_path).get("sftp", {})
+            host = sec.get("host", host)
+            port = int(sec.get("port", port))
+            username = sec.get("username", username)
+            password = sec.get("password", password)
+            remote_base_dir = sec.get("remote_base_dir", remote_base_dir)
+            public_url_base = sec.get("public_url_base", public_url_base)
+        except Exception:
+            pass
+
     return {
-        "host": "72.60.202.149",
-        "port": 22,
-        "username": "tools",
-        "password": "NatDhul#2025",
-        "remote_base_dir": "/var/www/premji",
-        "public_url_base": "http://72.60.202.149/premji"
+        "host": host,
+        "port": port,
+        "username": username,
+        "password": password,
+        "remote_base_dir": remote_base_dir,
+        "public_url_base": public_url_base
     }
 
 def get_sftp_client():

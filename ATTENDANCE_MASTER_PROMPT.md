@@ -168,7 +168,7 @@ const SFTP_CONFIG = {
   host: process.env.SFTP_HOST || "72.60.202.149",
   port: parseInt(process.env.SFTP_PORT || "22", 10),
   username: process.env.SFTP_USER || "tools",
-  password: process.env.SFTP_PASSWORD || "NatDhul#2025",
+  password: process.env.SFTP_PASSWORD,
   readyTimeout: 10000,
 };
 
@@ -251,7 +251,7 @@ const SFTP_CONFIG = {
   host: process.env.SFTP_HOST || "72.60.202.149",
   port: parseInt(process.env.SFTP_PORT || "22", 10),
   username: process.env.SFTP_USER || "tools",
-  password: process.env.SFTP_PASSWORD || "NatDhul#2025",
+  password: process.env.SFTP_PASSWORD,
   readyTimeout: 10000,
 };
 
